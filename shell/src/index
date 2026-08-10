@@ -1,0 +1,183 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width,
+                 initial-scale=1.0,
+                 maximum-scale=1.0,
+                 user-scalable=no"
+    >
+
+    <meta name="theme-color" content="#02050a">
+
+    <title>ONA Gaming Studio</title>
+
+    <link rel="stylesheet" href="./styles.css">
+
+</head>
+
+
+<body>
+
+    <!-- =========================================
+         ONA BOOT / INTRO
+    ========================================== -->
+
+    <section id="boot-screen">
+
+        <video
+            id="ona-intro"
+            autoplay
+            muted
+            playsinline
+            preload="auto"
+        >
+
+            <!--
+                ONA INTRO
+                Optimized H.264 / AAC MP4
+                Compatible with Tauri / WebView2
+            -->
+            <source
+                src="./assets/ONA Gaming Studio Web.mp4"
+                type="video/mp4"
+            >
+
+        </video>
+
+
+        <!--
+            Fallback visual in case the video
+            cannot be loaded.
+        -->
+        <div id="boot-fallback">
+            ONA
+        </div>
+
+    </section>
+
+
+    <!-- =========================================
+         ONA MAIN INTERFACE
+    ========================================== -->
+
+    <main id="ona-shell">
+
+        <!-- =====================================
+             HEADER
+        ====================================== -->
+
+        <header class="ona-header">
+
+            <div class="brand">
+
+                <span class="brand-main">ON</span>
+                <span class="brand-slash">/</span>
+                <span class="brand-main">A</span>
+
+            </div>
+
+
+            <div class="system-status">
+                SYSTEM READY
+            </div>
+
+        </header>
+
+
+        <!-- =====================================
+             HERO
+        ====================================== -->
+
+        <section class="hero">
+
+            <div class="hero-content">
+
+                <div class="eyebrow">
+                    OPEN NETWORK ARCHITECTURE
+                </div>
+
+
+                <h1>
+                    PLAY
+                    <span>WITHOUT LIMITS</span>
+                </h1>
+
+
+                <p>
+                    Your gaming environment is ready.
+                </p>
+
+
+                <div class="actions">
+
+                    <button id="connect-controller">
+                        CONNECT CONTROLLER
+                    </button>
+
+
+                    <button id="library-button">
+                        GAME LIBRARY
+                    </button>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- =====================================
+             FOOTER
+        ====================================== -->
+
+        <footer class="ona-footer">
+
+            <div>
+                ONA GAMING STUDIO
+            </div>
+
+
+            <div>
+
+                PLAYERS
+                <span id="player-count">
+                    0 / 10
+                </span>
+
+            </div>
+
+
+            <div>
+
+                CORE
+                <span class="online">
+                    ONLINE
+                </span>
+
+            </div>
+
+        </footer>
+
+    </main>
+
+
+    <!-- =========================================
+         ONA MAIN JAVASCRIPT
+    ========================================== -->
+
+    <script
+        type="module"
+        src="./main.js"
+    ></script>
+
+</body>
+
+</html>
+```

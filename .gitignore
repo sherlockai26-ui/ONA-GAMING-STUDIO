@@ -1,0 +1,20 @@
+# Rust build artifacts (en cualquier nivel del monorepo)
+target/
+**/target/
+
+# Node
+node_modules/
+**/node_modules/
+
+# Tauri / build output
+/build/
+/dist/
+**/dist/
+
+# Logs
+*.log
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/

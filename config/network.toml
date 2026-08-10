@@ -1,0 +1,3 @@
+# Network Configuration
+controller_port = 5000
+voice_port = 5001

@@ -1,0 +1,1752 @@
+/* =========================================================
+   ONA GAMING STUDIO
+   ONA SHELL
+========================================================= */
+
+/* =========================================================
+   RESET
+========================================================= */
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+
+    overflow: hidden;
+
+    background: #02050a;
+
+    font-family:
+        Arial,
+        Helvetica,
+        sans-serif;
+
+    color: #eaf6ff;
+
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+
+/* =========================================================
+   BOOT
+========================================================= */
+
+#boot-screen {
+    position: fixed;
+    inset: 0;
+
+    z-index: 1000;
+
+    width: 100vw;
+    height: 100vh;
+
+    background: #000;
+
+    overflow: hidden;
+
+    opacity: 1;
+    visibility: visible;
+
+    transition:
+        opacity 0.8s ease,
+        visibility 0.8s ease;
+}
+
+#ona-intro {
+    width: 100%;
+    height: 100%;
+
+    display: block;
+
+    object-fit: cover;
+
+    background: #000;
+
+    pointer-events: none;
+}
+
+#boot-screen.boot-hidden {
+    opacity: 0;
+
+    visibility: hidden;
+
+    pointer-events: none;
+}
+
+
+/* =========================================================
+   MAIN SHELL
+========================================================= */
+
+#ona-shell {
+    position: fixed;
+    inset: 0;
+
+    width: 100vw;
+    height: 100vh;
+
+    display: flex;
+
+    flex-direction: column;
+
+    background:
+        radial-gradient(
+            circle at 50% 45%,
+            rgba(
+                20,
+                90,
+                150,
+                0.16
+            ),
+            transparent 42%
+        ),
+
+        linear-gradient(
+            135deg,
+            #02050a 0%,
+            #07111d 50%,
+            #02050a 100%
+        );
+
+    opacity: 0;
+
+    pointer-events: none;
+
+    transition:
+        opacity 1s ease;
+}
+
+#ona-shell.shell-visible {
+    opacity: 1;
+
+    pointer-events: auto;
+}
+
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+.ona-header {
+    height: 90px;
+
+    flex-shrink: 0;
+
+    padding:
+        24px
+        36px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    border-bottom:
+        1px solid
+        rgba(
+            130,
+            190,
+            230,
+            0.12
+        );
+}
+
+.brand {
+    font-size: 30px;
+
+    font-weight: 300;
+
+    letter-spacing: 8px;
+
+    text-shadow:
+
+        0 0 10px
+        rgba(
+            50,
+            170,
+            255,
+            0.5
+        ),
+
+        0 0 30px
+        rgba(
+            20,
+            100,
+            255,
+            0.25
+        );
+}
+
+.brand-slash {
+    opacity: 0.65;
+}
+
+.system-status {
+    font-size: 11px;
+
+    letter-spacing: 2px;
+
+    color:
+        rgba(
+            190,
+            225,
+            245,
+            0.55
+        );
+}
+
+
+/* =========================================================
+   SCREENS
+========================================================= */
+
+.screen {
+    position: absolute;
+
+    inset:
+        90px
+        0
+        58px
+        0;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    text-align: center;
+
+    opacity: 0;
+
+    visibility: hidden;
+
+    pointer-events: none;
+
+    transform:
+        scale(0.985);
+
+    transition:
+
+        opacity 0.35s ease,
+
+        transform 0.35s ease,
+
+        visibility 0.35s ease;
+}
+
+.screen.active {
+    opacity: 1;
+
+    visibility: visible;
+
+    pointer-events: auto;
+
+    transform:
+        scale(1);
+}
+
+
+/* =========================================================
+   CONTROLLER SCREEN
+========================================================= */
+
+.controller-content {
+    width: min(
+        900px,
+        90vw
+    );
+
+    padding: 40px;
+}
+
+.controller-symbol {
+    width: 96px;
+    height: 96px;
+
+    margin:
+        0 auto 40px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    border:
+        1px solid
+        rgba(
+            100,
+            190,
+            255,
+            0.35
+        );
+
+    border-radius: 50%;
+
+    font-size: 18px;
+
+    letter-spacing: 4px;
+
+    color: #dff5ff;
+
+    box-shadow:
+
+        0 0 20px
+        rgba(
+            50,
+            160,
+            255,
+            0.12
+        ),
+
+        inset 0 0 20px
+        rgba(
+            50,
+            160,
+            255,
+            0.06
+        );
+}
+
+.eyebrow {
+    margin-bottom: 18px;
+
+    font-size: 11px;
+
+    letter-spacing: 4px;
+
+    color:
+        rgba(
+            130,
+            200,
+            245,
+            0.65
+        );
+}
+
+.controller-content h1,
+.menu-content h1,
+.profile-content h1 {
+    font-size:
+        clamp(
+            54px,
+            8vw,
+            110px
+        );
+
+    line-height: 0.9;
+
+    font-weight: 200;
+
+    letter-spacing: 8px;
+
+    text-shadow:
+
+        0 0 20px
+        rgba(
+            80,
+            180,
+            255,
+            0.18
+        );
+}
+
+.controller-content h1 span,
+.menu-content h1 span,
+.profile-content h1 span {
+    display: block;
+
+    margin-top: 14px;
+
+    font-size: 0.42em;
+
+    letter-spacing: 8px;
+
+    color:
+        rgba(
+            200,
+            230,
+            250,
+            0.7
+        );
+}
+
+.controller-content p {
+    margin-top: 28px;
+
+    color:
+        rgba(
+            190,
+            220,
+            240,
+            0.55
+        );
+
+    font-size: 15px;
+
+    letter-spacing: 1px;
+}
+
+
+/* =========================================================
+   QR CONNECTION
+========================================================= */
+
+.qr-container {
+    margin:
+        38px auto 0;
+
+    width: 190px;
+
+    display: flex;
+
+    flex-direction: column;
+
+    align-items: center;
+
+    gap: 12px;
+}
+
+.qr-code {
+    width: 150px;
+    height: 150px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    background: #ffffff;
+
+    border-radius: 8px;
+
+    box-shadow:
+
+        0 0 30px
+        rgba(
+            50,
+            170,
+            255,
+            0.18
+        );
+}
+
+.qr-label {
+    font-size: 9px;
+
+    letter-spacing: 3px;
+
+    color:
+        rgba(
+            180,
+            220,
+            240,
+            0.55
+        );
+}
+
+
+/* =========================================================
+   CONNECTION INDICATOR
+========================================================= */
+
+.connection-indicator {
+    margin-top: 45px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    gap: 12px;
+
+    font-size: 11px;
+
+    letter-spacing: 3px;
+
+    color:
+        rgba(
+            200,
+            230,
+            245,
+            0.7
+        );
+}
+
+.connection-dot {
+    width: 9px;
+    height: 9px;
+
+    border-radius: 50%;
+
+    background:
+        rgba(
+            255,
+            180,
+            80,
+            0.8
+        );
+
+    box-shadow:
+        0 0 12px
+        rgba(
+            255,
+            180,
+            80,
+            0.4
+        );
+
+    animation:
+        controller-pulse
+        1.5s infinite;
+}
+
+.connection-dot.connected {
+    background:
+        rgba(
+            90,
+            240,
+            170,
+            0.9
+        );
+
+    box-shadow:
+        0 0 15px
+        rgba(
+            90,
+            240,
+            170,
+            0.6
+        );
+
+    animation: none;
+}
+
+@keyframes controller-pulse {
+    0%,
+    100% {
+        opacity: 0.35;
+
+        transform:
+            scale(0.85);
+    }
+
+    50% {
+        opacity: 1;
+
+        transform:
+            scale(1.15);
+    }
+}
+
+.connection-hint {
+    margin-top: 55px;
+
+    font-size: 9px;
+
+    letter-spacing: 4px;
+
+    color:
+        rgba(
+            170,
+            210,
+            235,
+            0.25
+        );
+}
+
+
+/* =========================================================
+   PROFILE SCREEN
+========================================================= */
+
+.profile-content {
+    width: min(
+        1000px,
+        90vw
+    );
+
+    padding:
+        35px
+        40px;
+
+    text-align: center;
+}
+
+.profile-content .eyebrow {
+    margin-bottom: 16px;
+}
+
+.profile-content h1 {
+    margin: 0;
+}
+
+.profile-subtitle {
+    margin-top: 22px;
+
+    font-size: 13px;
+
+    letter-spacing: 2px;
+
+    color:
+        rgba(
+            190,
+            220,
+            240,
+            0.48
+        );
+}
+
+
+/* =========================================================
+   PROFILE CONTROLLER STATUS
+========================================================= */
+
+.profile-controller-status {
+    margin:
+        24px auto 0;
+
+    display: inline-flex;
+
+    align-items: center;
+
+    gap: 9px;
+
+    padding:
+        8px
+        14px;
+
+    border:
+        1px solid
+        rgba(
+            100,
+            230,
+            175,
+            0.16
+        );
+
+    border-radius: 999px;
+
+    background:
+        rgba(
+            50,
+            180,
+            130,
+            0.06
+        );
+
+    font-size: 9px;
+
+    letter-spacing: 2px;
+
+    color:
+        rgba(
+            170,
+            235,
+            210,
+            0.65
+        );
+}
+
+.profile-controller-dot {
+    width: 6px;
+    height: 6px;
+
+    border-radius: 50%;
+
+    background:
+        rgba(
+            100,
+            245,
+            175,
+            0.9
+        );
+
+    box-shadow:
+        0 0 10px
+        rgba(
+            100,
+            245,
+            175,
+            0.65
+        );
+}
+
+
+/* =========================================================
+   PROFILE GRID
+========================================================= */
+
+.profile-grid {
+    width: min(
+        760px,
+        90vw
+    );
+
+    margin:
+        38px
+        auto
+        0;
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(
+            3,
+            minmax(
+                0,
+                1fr
+            )
+        );
+
+    gap: 14px;
+}
+
+
+/* =========================================================
+   PROFILE CARD
+========================================================= */
+
+.profile-card {
+    position: relative;
+
+    min-height: 150px;
+
+    padding:
+        22px;
+
+    display: flex;
+
+    flex-direction: column;
+
+    align-items: center;
+
+    justify-content: center;
+
+    gap: 15px;
+
+    border:
+        1px solid
+        rgba(
+            120,
+            195,
+            240,
+            0.16
+        );
+
+    border-radius: 8px;
+
+    background:
+
+        linear-gradient(
+            145deg,
+            rgba(
+                35,
+                85,
+                120,
+                0.22
+            ),
+            rgba(
+                5,
+                20,
+                35,
+                0.35
+            )
+        );
+
+    color: #eaf6ff;
+
+    font-family:
+        Arial,
+        Helvetica,
+        sans-serif;
+
+    cursor: default;
+
+    transition:
+
+        transform 0.22s ease,
+
+        border-color 0.22s ease,
+
+        background 0.22s ease,
+
+        box-shadow 0.22s ease;
+}
+
+.profile-card::before {
+    content: "";
+
+    position: absolute;
+
+    inset: 0;
+
+    border-radius: inherit;
+
+    background:
+
+        linear-gradient(
+            120deg,
+            transparent 20%,
+            rgba(
+                100,
+                210,
+                255,
+                0.08
+            ),
+            transparent 80%
+        );
+
+    opacity: 0;
+
+    transition:
+        opacity 0.22s ease;
+}
+
+.profile-card.selected {
+    transform:
+        translateY(-3px);
+
+    border-color:
+        rgba(
+            145,
+            220,
+            255,
+            0.8
+        );
+
+    background:
+
+        linear-gradient(
+            145deg,
+            rgba(
+                40,
+                120,
+                175,
+                0.38
+            ),
+            rgba(
+                10,
+                35,
+                55,
+                0.58
+            )
+        );
+
+    box-shadow:
+
+        0 0 28px
+        rgba(
+            50,
+            175,
+            255,
+            0.14
+        ),
+
+        inset 0 0 25px
+        rgba(
+            70,
+            180,
+            255,
+            0.05
+        );
+}
+
+.profile-card.selected::before {
+    opacity: 1;
+}
+
+
+/* =========================================================
+   PROFILE AVATAR
+========================================================= */
+
+.profile-avatar {
+    width: 56px;
+    height: 56px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    border:
+        1px solid
+        rgba(
+            150,
+            220,
+            255,
+            0.32
+        );
+
+    border-radius: 50%;
+
+    background:
+        rgba(
+            20,
+            70,
+            105,
+            0.35
+        );
+
+    color:
+        rgba(
+            220,
+            242,
+            255,
+            0.9
+        );
+
+    font-size: 12px;
+
+    letter-spacing: 2px;
+
+    box-shadow:
+
+        inset 0 0 18px
+        rgba(
+            60,
+            180,
+            255,
+            0.08
+        );
+}
+
+.profile-card.selected .profile-avatar {
+    border-color:
+        rgba(
+            170,
+            230,
+            255,
+            0.8
+        );
+
+    box-shadow:
+
+        0 0 18px
+        rgba(
+            70,
+            190,
+            255,
+            0.2
+        ),
+
+        inset 0 0 18px
+        rgba(
+            70,
+            190,
+            255,
+            0.1
+        );
+}
+
+
+/* =========================================================
+   PROFILE INFO
+========================================================= */
+
+.profile-info {
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 5px;
+}
+
+.profile-name {
+    font-size: 10px;
+
+    letter-spacing: 2px;
+
+    color:
+        rgba(
+            225,
+            242,
+            250,
+            0.9
+        );
+}
+
+.profile-type {
+    font-size: 8px;
+
+    letter-spacing: 2px;
+
+    color:
+        rgba(
+            150,
+            200,
+            225,
+            0.4
+        );
+}
+
+
+/* =========================================================
+   PROFILE ARROW
+========================================================= */
+
+.profile-arrow {
+    position: absolute;
+
+    right: 14px;
+
+    top: 14px;
+
+    font-size: 15px;
+
+    color:
+        rgba(
+            150,
+            215,
+            245,
+            0.2
+        );
+
+    opacity: 0;
+
+    transform:
+        translateX(-4px);
+
+    transition:
+
+        opacity 0.2s ease,
+
+        transform 0.2s ease;
+}
+
+.profile-card.selected .profile-arrow {
+    opacity: 1;
+
+    transform:
+        translateX(0);
+
+    color:
+        rgba(
+            175,
+            230,
+            255,
+            0.8
+        );
+}
+
+
+/* =========================================================
+   ADD PROFILE
+========================================================= */
+
+.profile-add {
+    border-style: dashed;
+
+    background:
+        rgba(
+            10,
+            30,
+            45,
+            0.18
+        );
+}
+
+.profile-add-icon {
+    font-size: 25px;
+
+    font-weight: 200;
+
+    color:
+        rgba(
+            180,
+            225,
+            250,
+            0.5
+        );
+}
+
+
+/* =========================================================
+   PROFILE FOOTER
+========================================================= */
+
+.profile-footer {
+    margin-top: 30px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    gap: 10px;
+
+    font-size: 8px;
+
+    letter-spacing: 3px;
+
+    color:
+        rgba(
+            150,
+            195,
+            220,
+            0.32
+        );
+}
+
+.profile-footer-divider {
+    color:
+        rgba(
+            100,
+            180,
+            235,
+            0.3
+        );
+}
+
+#profile-player-number {
+    color:
+        rgba(
+            170,
+            220,
+            245,
+            0.62
+        );
+}
+
+
+/* =========================================================
+   MAIN MENU
+========================================================= */
+
+.menu-content {
+    width: min(
+        1000px,
+        90vw
+    );
+
+    padding: 40px;
+
+    text-align: center;
+}
+
+.menu-content p {
+    margin-top: 28px;
+
+    color:
+        rgba(
+            190,
+            220,
+            240,
+            0.5
+        );
+
+    font-size: 14px;
+
+    letter-spacing: 1px;
+}
+
+
+/* =========================================================
+   CURRENT PROFILE
+========================================================= */
+
+.current-profile {
+    margin:
+        28px
+        auto
+        0;
+
+    width:
+        fit-content;
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 12px;
+
+    padding:
+        8px
+        14px
+        8px
+        8px;
+
+    border:
+        1px solid
+        rgba(
+            120,
+            200,
+            245,
+            0.16
+        );
+
+    border-radius: 999px;
+
+    background:
+        rgba(
+            20,
+            60,
+            90,
+            0.2
+        );
+}
+
+.current-profile-avatar {
+    width: 34px;
+    height: 34px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    border-radius: 50%;
+
+    border:
+        1px solid
+        rgba(
+            150,
+            220,
+            255,
+            0.4
+        );
+
+    font-size: 8px;
+
+    letter-spacing: 1px;
+}
+
+.current-profile-info {
+    display: flex;
+
+    flex-direction: column;
+
+    align-items: flex-start;
+
+    gap: 3px;
+}
+
+.current-profile-label {
+    font-size: 7px;
+
+    letter-spacing: 2px;
+
+    color:
+        rgba(
+            150,
+            195,
+            220,
+            0.4
+        );
+}
+
+.current-profile-name {
+    font-size: 9px;
+
+    letter-spacing: 2px;
+
+    color:
+        rgba(
+            220,
+            240,
+            250,
+            0.85
+        );
+}
+
+.menu-grid {
+    margin-top: 40px;
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(
+            2,
+            minmax(
+                220px,
+                300px
+            )
+        );
+
+    justify-content: center;
+
+    gap: 16px;
+}
+
+.menu-item {
+    height: 70px;
+
+    border:
+        1px solid
+        rgba(
+            130,
+            200,
+            245,
+            0.22
+        );
+
+    border-radius: 6px;
+
+    background:
+        rgba(
+            30,
+            75,
+            110,
+            0.18
+        );
+
+    color: #eaf6ff;
+
+    font-size: 11px;
+
+    letter-spacing: 3px;
+
+    cursor: default;
+
+    transition:
+
+        background 0.2s ease,
+
+        border-color 0.2s ease,
+
+        box-shadow 0.2s ease;
+}
+
+.menu-item.selected {
+    border-color:
+        rgba(
+            150,
+            220,
+            255,
+            0.75
+        );
+
+    background:
+        rgba(
+            40,
+            110,
+            165,
+            0.35
+        );
+
+    box-shadow:
+
+        0 0 25px
+        rgba(
+            50,
+            170,
+            255,
+            0.12
+        );
+}
+
+
+/* =========================================================
+   SYSTEM MENU
+========================================================= */
+
+.system-menu {
+    position: fixed;
+
+    inset: 0;
+
+    z-index: 2000;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    background:
+        rgba(
+            0,
+            0,
+            0,
+            0.72
+        );
+
+    backdrop-filter:
+        blur(10px);
+
+    opacity: 0;
+
+    visibility: hidden;
+
+    pointer-events: none;
+
+    transition:
+        opacity 0.2s ease;
+}
+
+.system-menu.visible {
+    opacity: 1;
+
+    visibility: visible;
+
+    pointer-events: auto;
+}
+
+.system-menu-panel {
+    width: min(
+        430px,
+        80vw
+    );
+
+    padding: 30px;
+
+    border:
+        1px solid
+        rgba(
+            140,
+            210,
+            245,
+            0.2
+        );
+
+    border-radius: 8px;
+
+    background:
+        rgba(
+            5,
+            13,
+            22,
+            0.94
+        );
+
+    box-shadow:
+
+        0 30px 100px
+        rgba(
+            0,
+            0,
+            0,
+            0.6
+        );
+}
+
+.system-menu-title {
+    margin-bottom: 20px;
+
+    font-size: 10px;
+
+    letter-spacing: 4px;
+
+    color:
+        rgba(
+            180,
+            220,
+            240,
+            0.45
+        );
+}
+
+.system-menu-item {
+    width: 100%;
+
+    height: 52px;
+
+    margin-top: 8px;
+
+    border:
+        1px solid
+        rgba(
+            130,
+            200,
+            245,
+            0.16
+        );
+
+    border-radius: 5px;
+
+    background:
+        rgba(
+            20,
+            50,
+            75,
+            0.25
+        );
+
+    color: #eaf6ff;
+
+    font-size: 10px;
+
+    letter-spacing: 2px;
+
+    cursor: pointer;
+}
+
+.system-menu-item:hover,
+.system-menu-item:focus,
+.system-menu-item.selected {
+    outline: none;
+
+    border-color:
+        rgba(
+            150,
+            220,
+            255,
+            0.65
+        );
+
+    background:
+        rgba(
+            40,
+            110,
+            165,
+            0.4
+        );
+}
+
+
+/* =========================================================
+   FOOTER
+========================================================= */
+
+.ona-footer {
+    position: absolute;
+
+    bottom: 0;
+
+    left: 0;
+    right: 0;
+
+    height: 58px;
+
+    padding:
+        0 36px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    border-top:
+        1px solid
+        rgba(
+            130,
+            190,
+            230,
+            0.1
+        );
+
+    color:
+        rgba(
+            180,
+            215,
+            235,
+            0.45
+        );
+
+    font-size: 10px;
+
+    letter-spacing: 1.5px;
+}
+
+.ona-footer span {
+    margin-left: 8px;
+
+    color:
+        rgba(
+            210,
+            235,
+            250,
+            0.75
+        );
+}
+
+.ona-footer .online {
+    color:
+        rgba(
+            110,
+            230,
+            170,
+            0.85
+        );
+}
+
+
+/* =========================================================
+   MOUSE
+========================================================= */
+
+body {
+    cursor: none;
+}
+
+body.mouse-enabled {
+    cursor: default;
+}
+
+body.mouse-enabled button {
+    cursor: pointer;
+}
+
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+
+@media (max-width: 800px) {
+
+    .ona-header {
+        height: 70px;
+
+        padding:
+            20px;
+    }
+
+    .brand {
+        font-size: 24px;
+
+        letter-spacing: 6px;
+    }
+
+    .system-status {
+        display: none;
+    }
+
+    .screen {
+        inset:
+            70px
+            0
+            48px
+            0;
+    }
+
+    .controller-content,
+    .menu-content,
+    .profile-content {
+        padding:
+            24px;
+    }
+
+    .controller-content h1,
+    .menu-content h1,
+    .profile-content h1 {
+        font-size:
+            clamp(
+                42px,
+                12vw,
+                80px
+            );
+
+        letter-spacing: 4px;
+    }
+
+    .controller-content h1 span,
+    .menu-content h1 span,
+    .profile-content h1 span {
+        letter-spacing: 5px;
+    }
+
+    .profile-grid {
+        grid-template-columns:
+            1fr;
+
+        width:
+            min(
+                360px,
+                85vw
+            );
+
+        max-height:
+            42vh;
+
+        overflow-y: auto;
+
+        scrollbar-width: none;
+    }
+
+    .profile-grid::-webkit-scrollbar {
+        display: none;
+    }
+
+    .profile-card {
+        min-height: 90px;
+
+        padding:
+            14px
+            18px;
+
+        flex-direction: row;
+
+        justify-content: flex-start;
+
+        text-align: left;
+    }
+
+    .profile-avatar {
+        width: 46px;
+        height: 46px;
+
+        flex-shrink: 0;
+    }
+
+    .profile-arrow {
+        right: 18px;
+
+        top: 50%;
+
+        transform:
+            translateY(-50%)
+            translateX(-4px);
+    }
+
+    .profile-card.selected .profile-arrow {
+        transform:
+            translateY(-50%)
+            translateX(0);
+    }
+
+    .profile-footer {
+        margin-top: 18px;
+    }
+
+    .menu-grid {
+        grid-template-columns:
+            1fr;
+    }
+
+    .ona-footer {
+        height: 48px;
+
+        padding:
+            0 20px;
+
+        font-size: 8px;
+    }
+}
+
+
+/* =========================================================
+   LANDSCAPE
+========================================================= */
+
+@media (orientation: landscape) {
+
+    html,
+    body {
+        width: 100vw;
+
+        height: 100dvh;
+    }
+
+    #boot-screen,
+    #ona-shell {
+        width: 100vw;
+
+        height: 100dvh;
+    }
+}

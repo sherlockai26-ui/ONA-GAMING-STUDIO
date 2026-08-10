@@ -1,0 +1,11 @@
+{
+  "name": "ONA Controller",
+  "short_name": "ONA",
+  "description": "ONA Gaming Studio Controller",
+  "start_url": "/controller/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": []
+}

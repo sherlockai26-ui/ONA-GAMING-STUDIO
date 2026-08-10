@@ -1,0 +1,7 @@
+# Hardware Configuration
+
+[gpu]
+backend = "auto"
+
+[audio]
+backend = "default"

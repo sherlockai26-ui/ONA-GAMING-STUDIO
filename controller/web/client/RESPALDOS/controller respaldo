@@ -1,0 +1,146 @@
+// ============================================
+// ONA CONTROLLER
+// UI / INPUT LAYER
+// ============================================
+
+console.log("ONA Controller UI initialized");
+
+
+// ============================================
+// BOTONES
+// ============================================
+
+const buttons = document.querySelectorAll("[data-button]");
+
+buttons.forEach((button) => {
+
+    const name = button.dataset.button;
+
+    button.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+
+        console.log("BUTTON DOWN:", name);
+    });
+
+    button.addEventListener("pointerup", (event) => {
+        event.preventDefault();
+
+        console.log("BUTTON UP:", name);
+    });
+
+    button.addEventListener("pointercancel", (event) => {
+        event.preventDefault();
+
+        console.log("BUTTON CANCEL:", name);
+    });
+
+});
+
+
+// ============================================
+// JOYSTICK
+// ============================================
+
+const zone = document.getElementById("joystick-zone");
+const joystick = document.getElementById("joystick");
+
+let joystickActive = false;
+
+function updateJoystick(clientX, clientY) {
+
+    const rect = zone.getBoundingClientRect();
+
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    let x = clientX - centerX;
+    let y = clientY - centerY;
+
+    const maxDistance = rect.width * 0.27;
+
+    const distance = Math.sqrt(
+        x * x +
+        y * y
+    );
+
+    if (distance > maxDistance) {
+
+        x = (x / distance) * maxDistance;
+        y = (y / distance) * maxDistance;
+
+    }
+
+    const normalizedX = x / maxDistance;
+    const normalizedY = y / maxDistance;
+
+    joystick.style.transform =
+        `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+
+    console.log(
+        "JOYSTICK:",
+        normalizedX.toFixed(2),
+        normalizedY.toFixed(2)
+    );
+}
+
+
+function resetJoystick() {
+
+    joystickActive = false;
+
+    joystick.style.transform =
+        "translate(-50%, -50%)";
+
+    console.log("JOYSTICK RESET");
+
+}
+
+
+zone.addEventListener("pointerdown", (event) => {
+
+    event.preventDefault();
+
+    joystickActive = true;
+
+    zone.setPointerCapture(event.pointerId);
+
+    updateJoystick(
+        event.clientX,
+        event.clientY
+    );
+
+});
+
+
+zone.addEventListener("pointermove", (event) => {
+
+    if (!joystickActive) {
+        return;
+    }
+
+    event.preventDefault();
+
+    updateJoystick(
+        event.clientX,
+        event.clientY
+    );
+
+});
+
+
+zone.addEventListener("pointerup", (event) => {
+
+    event.preventDefault();
+
+    resetJoystick();
+
+});
+
+
+zone.addEventListener("pointercancel", (event) => {
+
+    event.preventDefault();
+
+    resetJoystick();
+
+});

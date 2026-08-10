@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width,
+                 height=device-height,
+                 initial-scale=1.0,
+                 minimum-scale=1.0,
+                 maximum-scale=1.0,
+                 user-scalable=no,
+                 viewport-fit=cover"
+    >
+
+    <meta
+        name="theme-color"
+        content="#02050a"
+    >
+
+    <meta
+        name="mobile-web-app-capable"
+        content="yes"
+    >
+
+    <meta
+        name="apple-mobile-web-app-capable"
+        content="yes"
+    >
+
+    <meta
+        name="apple-mobile-web-app-status-bar-style"
+        content="black-translucent"
+    >
+
+    <link
+        rel="manifest"
+        href="../manifest.json"
+    >
+
+    <title>ONA Controller</title>
+
+    <link
+        rel="stylesheet"
+        href="style.css?v=mobile-v2"
+    >
+
+</head>
+
+
+<body>
+
+    <main id="controller">
+
+
+        <!-- =========================================
+             PARTE SUPERIOR
+             ========================================= -->
+
+        <header class="top-bar">
+
+
+            <button
+                type="button"
+                class="shoulder l1"
+            >
+                L1
+            </button>
+
+
+            <button
+                type="button"
+                class="shoulder l2"
+            >
+                L2
+            </button>
+
+
+            <div class="ona-logo">
+                ON<span>/</span>A
+            </div>
+
+
+            <div class="system-buttons">
+
+                <button
+                    type="button"
+                    class="system-button"
+                >
+                    SELECT
+                </button>
+
+                <button
+                    type="button"
+                    class="system-button"
+                >
+                    START
+                </button>
+
+            </div>
+
+
+            <button
+                type="button"
+                class="shoulder r1"
+            >
+                R1
+            </button>
+
+
+            <button
+                type="button"
+                class="shoulder r2"
+            >
+                R2
+            </button>
+
+
+        </header>
+
+
+        <!-- =========================================
+             JOYSTICK
+             ========================================= -->
+
+        <section class="left-control">
+
+            <div id="joystick-zone">
+
+                <div id="joystick">
+
+                    <div class="joystick-core"></div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- =========================================
+             BOTONES A B X Y
+             ========================================= -->
+
+        <section class="right-control">
+
+
+            <button
+                type="button"
+                class="action-button button-y"
+                data-button="Y"
+            >
+                Y
+            </button>
+
+
+            <button
+                type="button"
+                class="action-button button-x"
+                data-button="X"
+            >
+                X
+            </button>
+
+
+            <button
+                type="button"
+                class="action-button button-b"
+                data-button="B"
+            >
+                B
+            </button>
+
+
+            <button
+                type="button"
+                class="action-button button-a"
+                data-button="A"
+            >
+                A
+            </button>
+
+
+        </section>
+
+
+    </main>
+
+
+    <script src="controller.js?v=mobile-v2"></script>
+
+</body>
+
+</html>
