@@ -1,8 +1,10 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 // Importamos los módulos necesarios de ona_core
-use ona_core::session::manager::create_session;
+mod display_manager;
+
 use ona_core::qr::generator::{generate, generate_svg};
+use ona_core::session::manager::create_session;
 use serde::Serialize;
 use tauri::Emitter;
 
@@ -37,6 +39,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![greet, generate_qr_session])
         .setup(|app| {
+            display_manager::configure_main_window(app)?;
+
             let app_handle = app.handle().clone();
 
             tauri::async_runtime::spawn(async move {
