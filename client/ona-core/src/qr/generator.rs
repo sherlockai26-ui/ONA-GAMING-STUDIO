@@ -8,26 +8,18 @@ pub fn generate(session_id: &str, token: &str, port: u16) -> String {
     let ip = match local_ip() {
         Ok(ip) => ip,
         Err(error) => {
-            eprintln!(
-                "ERROR: Could not detect local IP address: {}",
-                error
-            );
+            eprintln!("ERROR: Could not detect local IP address: {}", error);
 
             return format!(
                 "http://localhost:{}/controller/?id={}&token={}",
-                port,
-                session_id,
-                token
+                port, session_id, token
             );
         }
     };
 
     let url = format!(
         "http://{}:{}/controller/?id={}&token={}",
-        ip,
-        port,
-        session_id,
-        token
+        ip, port, session_id, token
     );
 
     println!("QR URL generated:");
@@ -36,19 +28,12 @@ pub fn generate(session_id: &str, token: &str, port: u16) -> String {
     url
 }
 
-pub fn generate_svg(
-    content: &str,
-    width: u32,
-    height: u32,
-) -> Result<String, String> {
+pub fn generate_svg(content: &str, width: u32, height: u32) -> Result<String, String> {
     let code = QrCode::new(content.as_bytes())
-        .map_err(|error| {
-            format!("Could not encode QR content: {error}")
-        })?;
+        .map_err(|error| format!("Could not encode QR content: {error}"))?;
 
-    Ok(
-        code.render::<svg::Color>()
-            .min_dimensions(width, height)
-            .build()
-    )
+    Ok(code
+        .render::<svg::Color>()
+        .min_dimensions(width, height)
+        .build())
 }

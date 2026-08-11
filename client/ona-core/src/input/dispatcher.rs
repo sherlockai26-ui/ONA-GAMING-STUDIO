@@ -1,13 +1,9 @@
-// dispatcher.rs
-// Distribuidor central de entradas.
+use super::{bridge::GameInputBridge, events::OnaInputEvent};
 
-use super::player_event::PlayerInputEvent;
+pub fn dispatch(event: OnaInputEvent, bridge: Option<&GameInputBridge>) {
+    println!("[ONA Input] {event:?}");
 
-pub fn dispatch(event: PlayerInputEvent) {
-    println!("INPUT RECEIVED:");
-    println!(
-        "Player {} -> {}",
-        event.player_id,
-        event.action
-    );
+    if let Some(bridge) = bridge {
+        bridge.send(event);
+    }
 }

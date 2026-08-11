@@ -7,7 +7,6 @@ pub struct CoreConfig {
 }
 
 impl CoreConfig {
-
     pub fn default() -> Self {
         Self {
             port: 8080,

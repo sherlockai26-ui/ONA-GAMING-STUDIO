@@ -1,29 +1,19 @@
-// catalog.rs
-// Catálogo local de juegos MVP.
+use serde::Serialize;
 
-#[derive(Debug, Clone)]
-pub struct GameEntry {
-    pub id: String,
-    pub name: String,
-}
+use super::profile::GameProfile;
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GameCatalog {
-    pub games: Vec<GameEntry>,
+    pub games: Vec<GameProfile>,
 }
 
 impl GameCatalog {
-    pub fn new() -> Self {
-        Self {
-            games: vec![
-                GameEntry {
-                    id: "game001".into(),
-                    name: "ONA Test Game".into(),
-                }
-            ],
-        }
+    pub fn new(games: Vec<GameProfile>) -> Self {
+        Self { games }
     }
 
-    pub fn list(&self) -> &Vec<GameEntry> {
+    pub fn list(&self) -> &[GameProfile] {
         &self.games
     }
 }

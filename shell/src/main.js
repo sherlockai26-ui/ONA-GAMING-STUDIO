@@ -35,6 +35,15 @@ const profileScreen =
 const mainMenu =
     document.getElementById("main-menu");
 
+const controllersScreen =
+    document.getElementById("controllers-screen");
+
+const gameLibraryScreen =
+    document.getElementById("game-library-screen");
+
+const controllerLabScreen =
+    document.getElementById("controller-lab-screen");
+
 const systemMenu =
     document.getElementById("system-menu");
 
@@ -65,14 +74,113 @@ const currentProfileAvatar =
 const currentProfileName =
     document.getElementById("current-profile-name");
 
+const homePlayerAvatar =
+    document.getElementById("home-player-avatar");
+
+const homePlayerName =
+    document.getElementById("home-player-name");
+
+const homeContinueCard =
+    document.getElementById("home-continue-card");
+
+const homeContinueTitle =
+    document.getElementById("home-continue-title");
+
+const homeContinueMeta =
+    document.getElementById("home-continue-meta");
+
+const homeContinueAction =
+    document.getElementById("home-continue-action");
+
+const homeRecentRow =
+    document.getElementById("home-recent-row");
+
 const resumeButton =
     document.getElementById("resume-button");
+
+const homeButton =
+    document.getElementById("home-button");
+
+const quickControllersButton =
+    document.getElementById("quick-controllers-button");
+
+const minimizeButton =
+    document.getElementById("minimize-button");
 
 const restartButton =
     document.getElementById("restart-button");
 
 const exitButton =
     document.getElementById("exit-button");
+
+const importGameButton =
+    document.getElementById("import-game-button");
+
+const libraryStatus =
+    document.getElementById("library-status");
+
+const gameGrid =
+    document.getElementById("game-grid");
+
+const controllersStatus =
+    document.getElementById("controllers-status");
+
+const calibrateControllerButton =
+    document.getElementById("calibrate-controller-button");
+
+const changeProfileButton =
+    document.getElementById("change-profile-button");
+
+const addControllerButton =
+    document.getElementById("add-controller-button");
+
+const labConnectionDot =
+    document.getElementById("lab-connection-dot");
+
+const labConnectionText =
+    document.getElementById("lab-connection-text");
+
+const labStickDot =
+    document.getElementById("lab-stick-dot");
+
+const labStickX =
+    document.getElementById("lab-stick-x");
+
+const labStickY =
+    document.getElementById("lab-stick-y");
+
+const labButtons =
+    document.getElementById("lab-buttons");
+
+const labDeadzone =
+    document.getElementById("lab-deadzone");
+
+const labDeadzoneValue =
+    document.getElementById("lab-deadzone-value");
+
+const labSensitivity =
+    document.getElementById("lab-sensitivity");
+
+const labSensitivityValue =
+    document.getElementById("lab-sensitivity-value");
+
+const labCenterButton =
+    document.getElementById("lab-center-button");
+
+const labSaveProfileButton =
+    document.getElementById("lab-save-profile-button");
+
+const labProfileName =
+    document.getElementById("lab-profile-name");
+
+const labLastInput =
+    document.getElementById("lab-last-input");
+
+const labBridgeStatus =
+    document.getElementById("lab-bridge-status");
+
+const labSaveStatus =
+    document.getElementById("lab-save-status");
 
 
 // =========================================================
@@ -93,14 +201,41 @@ const ONA_STATE = {
     MAIN_MENU:
         "main-menu",
 
-    SYSTEM_MENU:
-        "system-menu"
+    HOME:
+        "main-menu",
+
+    GAME_LIBRARY:
+        "game-library",
+
+    CONTROLLERS:
+        "controllers",
+
+    CONTROLLER_LAB:
+        "controller-lab",
+
+    QUICK_MENU:
+        "quick-menu",
+
+    GAME_RUNNING:
+        "game-running"
 
 };
 
 
 let currentState =
     ONA_STATE.BOOT;
+
+let stateBeforeSystemMenu =
+    ONA_STATE.WAITING_CONTROLLER;
+
+let uiNavigationLocked =
+    false;
+
+const UI_NAVIGATION_THRESHOLD =
+    0.35;
+
+const UI_NAVIGATION_NEUTRAL_THRESHOLD =
+    0.2;
 
 
 // =========================================================
@@ -127,6 +262,59 @@ let currentProfile = {
 
 };
 
+let installedGames = [];
+
+let selectedGameIndex = 0;
+
+let addingController =
+    false;
+
+const ONA_CONTROLLER_BUTTONS = [
+    "A",
+    "B",
+    "X",
+    "Y",
+    "L1",
+    "L2",
+    "R1",
+    "R2",
+    "SELECT",
+    "START"
+];
+
+let controllerProfile = {
+    name:
+        "Default",
+
+    stick: {
+        centerX:
+            0,
+        centerY:
+            0,
+        deadzone:
+            0.12,
+        sensitivity:
+            1
+    },
+
+    buttonMapping:
+        ONA_CONTROLLER_BUTTONS.map(
+            (button) => ({
+                physical:
+                    button,
+                onaAction:
+                    button
+            })
+        )
+};
+
+let lastRawStick = {
+    x:
+        0,
+    y:
+        0
+};
+
 
 // =========================================================
 // SCREEN MANAGEMENT
@@ -146,6 +334,18 @@ function hideAllScreens() {
         ?.classList
         .remove("active");
 
+    controllersScreen
+        ?.classList
+        .remove("active");
+
+    gameLibraryScreen
+        ?.classList
+        .remove("active");
+
+    controllerLabScreen
+        ?.classList
+        .remove("active");
+
 }
 
 
@@ -161,7 +361,32 @@ function showControllerScreen() {
         ?.classList
         .add("active");
 
+    updateControllerScreenMode();
+
     generateQR();
+
+}
+
+
+function updateControllerScreenMode() {
+
+    if (controllerStatus) {
+        controllerStatus.textContent =
+            addingController
+                ? "Scan to add another ONA Controller."
+                : "Scan the QR code with your phone to begin.";
+    }
+
+    if (connectionText) {
+        connectionText.textContent =
+            addingController
+                ? `PLAYER ${playerCountValue + 1} PAIRING`
+                : "WAITING FOR CONTROLLER";
+    }
+
+    connectionDot
+        ?.classList
+        .toggle("connected", playerCountValue > 0);
 
 }
 
@@ -224,6 +449,279 @@ function showMainMenu() {
         .add("active");
 
     updateCurrentProfile();
+    updateHomePlayer();
+    loadHomeCatalog();
+
+}
+
+
+async function loadHomeCatalog() {
+
+    try {
+
+        const catalog =
+            await invoke("list_installed_games");
+
+        installedGames =
+            Array.isArray(catalog?.games)
+                ? catalog.games
+                : [];
+
+        if (
+            selectedGameIndex >= installedGames.length
+        ) {
+            selectedGameIndex = 0;
+        }
+
+        renderHome();
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "[ONA Home] Unable to load games:",
+            error
+        );
+
+        installedGames = [];
+
+        renderHome();
+
+    }
+
+}
+
+
+function updateHomePlayer() {
+
+    if (homePlayerAvatar) {
+        homePlayerAvatar.textContent =
+            `P${currentProfile.player}`;
+    }
+
+    if (homePlayerName) {
+        homePlayerName.textContent =
+            currentProfile.name;
+    }
+
+}
+
+
+function renderHome() {
+
+    const activeGame =
+        installedGames[selectedGameIndex] ||
+        installedGames[0];
+
+    mainMenu
+        ?.classList
+        .toggle(
+            "home-has-games",
+            Boolean(activeGame)
+        );
+
+    if (homeContinueCard) {
+        homeContinueCard.classList.toggle(
+            "home-empty-library",
+            !activeGame
+        );
+    }
+
+    if (homeContinueTitle) {
+        homeContinueTitle.textContent =
+            activeGame?.name ||
+            "YOUR LIBRARY IS READY";
+    }
+
+    if (homeContinueMeta) {
+        homeContinueMeta.textContent =
+            activeGame
+                ? "Ready to play"
+                : "Add your first game to start playing.";
+    }
+
+    if (homeContinueAction) {
+        homeContinueAction.textContent =
+            activeGame
+                ? "PLAY NOW"
+                : "GAME LIBRARY";
+    }
+
+    renderHomeRecentGames();
+
+}
+
+
+function renderHomeRecentGames() {
+
+    if (!homeRecentRow) {
+        return;
+    }
+
+    const selectedAction =
+        mainMenu
+            ?.querySelector(".menu-item.selected")
+            ?.dataset
+            ?.action;
+
+    homeRecentRow.innerHTML = "";
+
+    installedGames.forEach(
+        (game, index) => {
+
+            const card =
+                document.createElement("button");
+
+            card.className =
+                "menu-item home-recent-card";
+
+            card.dataset.action =
+                "recent";
+
+            card.dataset.gameIndex =
+                String(index);
+
+            card.classList.toggle(
+                "selected",
+                index === selectedGameIndex &&
+                selectedAction === "recent"
+            );
+
+            const iconMarkup =
+                game.icon
+                    ? `<img class="home-game-art" src="${escapeAttribute(game.icon)}" alt="">`
+                    : `<span class="home-game-art home-game-art-placeholder">${escapeHtml(game.name?.slice(0, 2) || "ON")}</span>`;
+
+            card.innerHTML =
+                `${iconMarkup}
+                <span class="home-recent-name">${escapeHtml(game.name || "Untitled Game")}</span>`;
+
+            card.addEventListener(
+                "click",
+                () => {
+                    selectedGameIndex = index;
+                    mainMenu
+                        ?.querySelectorAll(".menu-item")
+                        .forEach(
+                            (item) =>
+                                item.classList.remove("selected")
+                        );
+                    card.classList.add("selected");
+                    renderHome();
+                }
+            );
+
+            homeRecentRow.appendChild(card);
+
+        }
+    );
+
+}
+
+
+// =========================================================
+// SHOW GAME LIBRARY
+// =========================================================
+
+function showGameLibrary() {
+
+    hideAllScreens();
+
+    gameLibraryScreen
+        ?.classList
+        .add("active");
+
+    loadGameLibrary();
+
+}
+
+
+// =========================================================
+// SHOW CONTROLLERS
+// =========================================================
+
+function showControllers() {
+
+    hideAllScreens();
+
+    controllersScreen
+        ?.classList
+        .add("active");
+
+    updateControllersScreen();
+
+}
+
+
+function showAdditionalControllerQr() {
+
+    if (playerCountValue <= 0) {
+        return;
+    }
+
+    addingController =
+        true;
+
+    transitionTo(
+        ONA_STATE.WAITING_CONTROLLER,
+        {
+            addingController:
+                true,
+            keepAddingController:
+                true
+        }
+    );
+
+}
+
+
+// =========================================================
+// SHOW CONTROLLER LAB
+// =========================================================
+
+function showControllerLab() {
+
+    hideAllScreens();
+
+    controllerLabScreen
+        ?.classList
+        .add("active");
+
+    updateControllerLabConnection();
+
+    updateControllersScreen();
+
+    updateControllerLabProfile();
+
+    updateControllerLabBridgeStatus();
+
+}
+
+
+// =========================================================
+// STATE TRANSITIONS
+// =========================================================
+
+function transitionTo(state, context = {}) {
+
+    if (
+        state === ONA_STATE.WAITING_CONTROLLER &&
+        playerCountValue > 0 &&
+        !context.addingController
+    ) {
+        return;
+    }
+
+    if (
+        state !== ONA_STATE.WAITING_CONTROLLER &&
+        !context.keepAddingController
+    ) {
+        addingController =
+            false;
+    }
+
+    setState(state);
 
 }
 
@@ -266,12 +764,991 @@ function setState(state) {
 
             break;
 
+        case ONA_STATE.GAME_LIBRARY:
 
-        case ONA_STATE.SYSTEM_MENU:
+            showGameLibrary();
+
+            break;
+
+        case ONA_STATE.CONTROLLERS:
+
+            showControllers();
+
+            break;
+
+        case ONA_STATE.CONTROLLER_LAB:
+
+            showControllerLab();
+
+            break;
+
+
+        case ONA_STATE.QUICK_MENU:
 
             break;
 
     }
+
+}
+
+
+// =========================================================
+// GAME LIBRARY DATA
+// =========================================================
+
+async function loadGameLibrary() {
+
+    if (libraryStatus) {
+        libraryStatus.textContent =
+            "Loading installed games.";
+    }
+
+    try {
+
+        const catalog =
+            await invoke("list_installed_games");
+
+        installedGames =
+            Array.isArray(catalog?.games)
+                ? catalog.games
+                : [];
+
+        if (
+            selectedGameIndex >= installedGames.length
+        ) {
+            selectedGameIndex = 0;
+        }
+
+        renderGameLibrary();
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "[ONA Library] Unable to load games:",
+            error
+        );
+
+        if (libraryStatus) {
+            libraryStatus.textContent =
+                `Library error: ${error}`;
+        }
+
+    }
+
+}
+
+
+function renderGameLibrary() {
+
+    if (!gameGrid) {
+        return;
+    }
+
+    gameGrid.innerHTML = "";
+
+    if (!installedGames.length) {
+
+        if (libraryStatus) {
+            libraryStatus.textContent =
+                "No installed games. Import a local game package to add it to ONA.";
+        }
+
+        return;
+
+    }
+
+    if (libraryStatus) {
+        libraryStatus.textContent =
+            `${installedGames.length} installed game${installedGames.length === 1 ? "" : "s"}.`;
+    }
+
+    installedGames.forEach(
+        (game, index) => {
+
+            const card =
+                document.createElement("button");
+
+            card.className =
+                "game-card";
+
+            card.dataset.gameId =
+                game.id;
+
+            card.classList.toggle(
+                "selected",
+                index === selectedGameIndex
+            );
+
+            const iconMarkup =
+                game.icon
+                    ? `<img class="game-icon" src="${escapeAttribute(game.icon)}" alt="">`
+                    : `<div class="game-icon game-icon-placeholder">${escapeHtml(game.name?.slice(0, 2) || "ON")}</div>`;
+
+            card.innerHTML =
+                `${iconMarkup}
+                <div class="game-card-body">
+                    <div class="game-title">${escapeHtml(game.name || "Untitled Game")}</div>
+                    <div class="game-meta">${escapeHtml(game.developer || "Unknown Developer")} / ${escapeHtml(game.version || "0.0.0")}</div>
+                    <div class="game-description">${escapeHtml(game.description || "")}</div>
+                    <div class="game-state">${game.installed ? "INSTALLED" : "NOT INSTALLED"}</div>
+                </div>
+                <div class="game-play-label">PLAY</div>`;
+
+            card.addEventListener(
+                "click",
+                () => {
+                    selectedGameIndex = index;
+                    renderGameLibrary();
+                }
+            );
+
+            card.addEventListener(
+                "dblclick",
+                () => launchSelectedGame()
+            );
+
+            gameGrid.appendChild(card);
+
+        }
+    );
+
+}
+
+
+function navigateGames(direction) {
+
+    if (
+        currentState !== ONA_STATE.GAME_LIBRARY ||
+        !installedGames.length
+    ) {
+        return;
+    }
+
+    selectedGameIndex += direction;
+
+    if (selectedGameIndex < 0) {
+        selectedGameIndex = installedGames.length - 1;
+    }
+
+    if (selectedGameIndex >= installedGames.length) {
+        selectedGameIndex = 0;
+    }
+
+    renderGameLibrary();
+
+}
+
+
+function selectedIndexFromElements(elements) {
+
+    const selectedIndex =
+        elements.findIndex(
+            (element) =>
+                element.classList.contains("selected")
+        );
+
+    return selectedIndex >= 0
+        ? selectedIndex
+        : 0;
+
+}
+
+
+function selectElementByIndex(elements, index) {
+
+    if (!elements.length) {
+        return;
+    }
+
+    let nextIndex =
+        index;
+
+    if (nextIndex < 0) {
+        nextIndex =
+            elements.length - 1;
+    }
+
+    if (nextIndex >= elements.length) {
+        nextIndex =
+            0;
+    }
+
+    elements.forEach(
+        (element) =>
+            element.classList.remove("selected")
+    );
+
+    elements[nextIndex]
+        .classList
+        .add("selected");
+
+}
+
+
+function moveSelectedElement(container, selector, direction) {
+
+    const elements =
+        Array.from(
+            container?.querySelectorAll(selector) || []
+        );
+
+    if (!elements.length) {
+        return;
+    }
+
+    selectElementByIndex(
+        elements,
+        selectedIndexFromElements(elements) + direction
+    );
+
+}
+
+
+function navigateSystemMenu(direction) {
+
+    moveSelectedElement(
+        systemMenu,
+        ".system-menu-item",
+        direction
+    );
+
+}
+
+
+function activateSelectedSystemMenuItem() {
+
+    const selected =
+        systemMenu?.querySelector(
+            ".system-menu-item.selected"
+        );
+
+    selected?.click();
+
+}
+
+
+function directionFromJoystick(x, y) {
+
+    const absX =
+        Math.abs(x);
+
+    const absY =
+        Math.abs(y);
+
+    if (
+        absX < UI_NAVIGATION_THRESHOLD &&
+        absY < UI_NAVIGATION_THRESHOLD
+    ) {
+        return null;
+    }
+
+    if (absX > absY) {
+        return x > 0
+            ? "right"
+            : "left";
+    }
+
+    return y > 0
+        ? "down"
+        : "up";
+
+}
+
+
+function handleUiJoystickNavigation(x, y) {
+
+    if (
+        Math.abs(x) < UI_NAVIGATION_NEUTRAL_THRESHOLD &&
+        Math.abs(y) < UI_NAVIGATION_NEUTRAL_THRESHOLD
+    ) {
+        uiNavigationLocked =
+            false;
+
+        return true;
+    }
+
+    if (uiNavigationLocked) {
+        return true;
+    }
+
+    const direction =
+        directionFromJoystick(
+            x,
+            y
+        );
+
+    if (!direction) {
+        return true;
+    }
+
+    uiNavigationLocked =
+        true;
+
+    moveUiSelection(direction);
+
+    return true;
+
+}
+
+
+function moveUiSelection(direction) {
+
+    const step =
+        direction === "left" ||
+        direction === "up"
+            ? -1
+            : 1;
+
+    if (
+        currentState ===
+        ONA_STATE.PROFILE_SELECT
+    ) {
+        navigateProfiles(step);
+        return;
+    }
+
+    if (
+        currentState ===
+        ONA_STATE.MAIN_MENU
+    ) {
+        moveSelectedElement(
+            mainMenu,
+            ".menu-item",
+            step
+        );
+        return;
+    }
+
+    if (
+        currentState ===
+        ONA_STATE.GAME_LIBRARY
+    ) {
+        navigateGames(step);
+        return;
+    }
+
+    if (
+        currentState ===
+        ONA_STATE.CONTROLLERS
+    ) {
+        moveSelectedElement(
+            controllersScreen,
+            ".controller-slot",
+            step
+        );
+        return;
+    }
+
+    if (
+        currentState ===
+        ONA_STATE.QUICK_MENU
+    ) {
+        navigateSystemMenu(step);
+    }
+
+}
+
+
+async function importLocalGame() {
+
+    const sourceDir =
+        window.prompt(
+            "Paste the local game package folder path:"
+        );
+
+    if (!sourceDir) {
+        return;
+    }
+
+    if (libraryStatus) {
+        libraryStatus.textContent =
+            "Importing local game package.";
+    }
+
+    try {
+
+        const profile =
+            await invoke(
+                "import_local_game",
+                {
+                    sourceDir,
+                    overwrite:
+                        false
+                }
+            );
+
+        console.log(
+            "[ONA Library] Imported:",
+            profile
+        );
+
+        await loadGameLibrary();
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "[ONA Library] Import failed:",
+            error
+        );
+
+        if (libraryStatus) {
+            libraryStatus.textContent =
+                `Import failed: ${error}`;
+        }
+
+    }
+
+}
+
+
+async function launchSelectedGame() {
+
+    const game =
+        installedGames[selectedGameIndex];
+
+    if (!game) {
+        return;
+    }
+
+    if (libraryStatus) {
+        libraryStatus.textContent =
+            `Launching ${game.name}.`;
+    }
+
+    try {
+
+        const status =
+            await invoke(
+                "launch_installed_game",
+                {
+                    gameId:
+                        game.id
+                }
+            );
+
+        console.log(
+            "[ONA Launcher]",
+            status
+        );
+
+        if (libraryStatus) {
+            libraryStatus.textContent =
+                status.pid
+                    ? `${game.name} is running. PID ${status.pid}.`
+                    : `${game.name} launch state: ${status.state}.`;
+        }
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "[ONA Launcher] Launch failed:",
+            error
+        );
+
+        if (libraryStatus) {
+            libraryStatus.textContent =
+                `Launch failed: ${error}`;
+        }
+
+    }
+
+}
+
+
+async function showRuntimeStatus() {
+
+    try {
+
+        const status =
+            await invoke(
+                "running_game_status"
+            );
+
+        const bridge =
+            await invoke(
+                "game_input_bridge_status"
+            );
+
+        if (libraryStatus) {
+            libraryStatus.textContent =
+                `Runtime ${status.state}. PID ${status.pid || "none"}. Input bridge ${bridge.address}.`;
+        }
+
+    }
+
+    catch (error) {
+        console.error(
+            "[ONA Runtime] Status failed:",
+            error
+        );
+    }
+
+}
+
+
+// =========================================================
+// CONTROLLER LAB DATA
+// =========================================================
+
+function renderControllerLabButtons() {
+
+    if (!labButtons) {
+        return;
+    }
+
+    labButtons.innerHTML =
+        "";
+
+    ONA_CONTROLLER_BUTTONS.forEach(
+        (button) => {
+
+            const buttonElement =
+                document.createElement("div");
+
+            buttonElement.className =
+                "lab-button";
+
+            buttonElement.dataset.button =
+                button;
+
+            buttonElement.innerHTML =
+                `<span>${button}</span><strong>RELEASED</strong>`;
+
+            labButtons.appendChild(buttonElement);
+
+        }
+    );
+
+}
+
+
+async function loadControllerProfile() {
+
+    try {
+
+        controllerProfile =
+            await invoke(
+                "load_controller_profile",
+                {
+                    playerId:
+                        selectedPlayer
+                }
+            );
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "[Controller Lab] Profile load failed:",
+            error
+        );
+
+    }
+
+    updateControllerLabProfile();
+
+}
+
+
+async function saveControllerProfile() {
+
+    try {
+
+        controllerProfile =
+            await invoke(
+                "save_controller_profile",
+                {
+                    playerId:
+                        selectedPlayer,
+                    profile:
+                        controllerProfile
+                }
+            );
+
+        if (labSaveStatus) {
+            labSaveStatus.textContent =
+                "Profile saved.";
+        }
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "[Controller Lab] Profile save failed:",
+            error
+        );
+
+        if (labSaveStatus) {
+            labSaveStatus.textContent =
+                `Save failed: ${error}`;
+        }
+
+    }
+
+    updateControllerLabProfile();
+
+}
+
+
+function updateControllersScreen() {
+
+    if (controllersStatus) {
+        controllersStatus.textContent =
+            playerCountValue > 0
+                ? `${playerCountValue} CONTROLLER${playerCountValue === 1 ? "" : "S"} CONNECTED`
+                : "WAITING FOR CONTROLLER";
+    }
+
+}
+
+
+function selectedControllerAction() {
+
+    return controllersScreen
+        ?.querySelector(".controller-slot.selected")
+        ?.dataset
+        ?.controllerAction;
+
+}
+
+
+function activateSelectedControllerAction() {
+
+    const action =
+        selectedControllerAction();
+
+    if (action === "profile") {
+        transitionTo(
+            ONA_STATE.PROFILE_SELECT
+        );
+        return;
+    }
+
+    if (action === "add") {
+        showAdditionalControllerQr();
+        return;
+    }
+
+    if (action === "calibrate") {
+        openControllerLab();
+    }
+
+}
+
+
+function openControllerLab() {
+
+    loadControllerProfile();
+
+    transitionTo(
+        ONA_STATE.CONTROLLER_LAB
+    );
+
+}
+
+
+function updateControllerLabProfile() {
+
+    if (labProfileName) {
+        labProfileName.textContent =
+            controllerProfile.name || "Default";
+    }
+
+    if (labDeadzone) {
+        labDeadzone.value =
+            String(controllerProfile.stick?.deadzone ?? 0.12);
+    }
+
+    if (labDeadzoneValue) {
+        labDeadzoneValue.textContent =
+            Number(controllerProfile.stick?.deadzone ?? 0.12).toFixed(2);
+    }
+
+    if (labSensitivity) {
+        labSensitivity.value =
+            String(controllerProfile.stick?.sensitivity ?? 1);
+    }
+
+    if (labSensitivityValue) {
+        labSensitivityValue.textContent =
+            Number(controllerProfile.stick?.sensitivity ?? 1).toFixed(2);
+    }
+
+}
+
+
+function updateControllerLabConnection() {
+
+    const connected =
+        playerCountValue > 0;
+
+    labConnectionDot
+        ?.classList
+        .toggle("connected", connected);
+
+    if (labConnectionText) {
+        labConnectionText.textContent =
+            connected
+                ? "CONNECTED"
+                : "WAITING";
+    }
+
+}
+
+
+async function updateControllerLabBridgeStatus() {
+
+    if (!labBridgeStatus) {
+        return;
+    }
+
+    try {
+
+        const bridge =
+            await invoke("game_input_bridge_status");
+
+        labBridgeStatus.textContent =
+            bridge.running
+                ? bridge.address
+                : "OFFLINE";
+
+    }
+
+    catch (error) {
+
+        labBridgeStatus.textContent =
+            "UNKNOWN";
+
+        console.error(
+            "[Controller Lab] Bridge status failed:",
+            error
+        );
+
+    }
+
+}
+
+
+function updateControllerLabStick(x, y) {
+
+    lastRawStick = {
+        x,
+        y
+    };
+
+    const stick =
+        controllerProfile.stick || {};
+
+    const centerX =
+        Number(stick.centerX || 0);
+
+    const centerY =
+        Number(stick.centerY || 0);
+
+    const deadzone =
+        Number(stick.deadzone ?? 0.12);
+
+    const sensitivity =
+        Number(stick.sensitivity ?? 1);
+
+    let calibratedX =
+        x - centerX;
+
+    let calibratedY =
+        y - centerY;
+
+    const distance =
+        Math.hypot(
+            calibratedX,
+            calibratedY
+        );
+
+    if (distance <= deadzone) {
+        calibratedX = 0;
+        calibratedY = 0;
+    }
+
+    else {
+
+        const range =
+            1 - deadzone;
+
+        const scaledDistance =
+            Math.min(
+                1,
+                Math.max(
+                    0,
+                    (distance - deadzone) / range
+                )
+            );
+
+        const scale =
+            distance > 0
+                ? scaledDistance / distance
+                : 0;
+
+        calibratedX =
+            Math.max(
+                -1,
+                Math.min(
+                    1,
+                    calibratedX * scale * sensitivity
+                )
+            );
+
+        calibratedY =
+            Math.max(
+                -1,
+                Math.min(
+                    1,
+                    calibratedY * scale * sensitivity
+                )
+            );
+
+    }
+
+    if (labStickX) {
+        labStickX.textContent =
+            calibratedX.toFixed(2);
+    }
+
+    if (labStickY) {
+        labStickY.textContent =
+            calibratedY.toFixed(2);
+    }
+
+    if (labStickDot) {
+        labStickDot.style.transform =
+            `translate(calc(-50% + ${calibratedX * 72}px), calc(-50% + ${calibratedY * 72}px))`;
+    }
+
+    if (labLastInput) {
+        labLastInput.textContent =
+            `JOYSTICK ${calibratedX.toFixed(2)} / ${calibratedY.toFixed(2)}`;
+    }
+
+}
+
+
+function updateControllerLabButton(button, state) {
+
+    const labButton =
+        labButtons?.querySelector(
+            `[data-button="${button}"]`
+        );
+
+    if (!labButton) {
+        return;
+    }
+
+    const pressed =
+        state === "down" ||
+        state === "pressed";
+
+    labButton
+        .classList
+        .toggle("pressed", pressed);
+
+    const stateElement =
+        labButton.querySelector("strong");
+
+    if (stateElement) {
+        stateElement.textContent =
+            pressed
+                ? "PRESSED"
+                : "RELEASED";
+    }
+
+    if (labLastInput) {
+        labLastInput.textContent =
+            `${button} ${pressed ? "DOWN" : "UP"}`;
+    }
+
+}
+
+
+function setControllerLabCenter() {
+
+    controllerProfile.stick = {
+        ...(controllerProfile.stick || {}),
+        centerX:
+            lastRawStick.x,
+        centerY:
+            lastRawStick.y
+    };
+
+    if (labSaveStatus) {
+        labSaveStatus.textContent =
+            "Stick center updated.";
+    }
+
+    updateControllerLabStick(
+        lastRawStick.x,
+        lastRawStick.y
+    );
+
+}
+
+
+function setControllerLabDeadzone(value) {
+
+    controllerProfile.stick = {
+        ...(controllerProfile.stick || {}),
+        deadzone:
+            Number(value)
+    };
+
+    updateControllerLabProfile();
+
+    updateControllerLabStick(
+        lastRawStick.x,
+        lastRawStick.y
+    );
+
+}
+
+
+function setControllerLabSensitivity(value) {
+
+    controllerProfile.stick = {
+        ...(controllerProfile.stick || {}),
+        sensitivity:
+            Number(value)
+    };
+
+    updateControllerLabProfile();
+
+    updateControllerLabStick(
+        lastRawStick.x,
+        lastRawStick.y
+    );
+
+}
+
+
+function escapeHtml(value) {
+
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+
+}
+
+
+function escapeAttribute(value) {
+
+    return escapeHtml(value);
 
 }
 
@@ -297,7 +1774,7 @@ function showShell() {
         .add("boot-hidden");
 
 
-    setState(
+    transitionTo(
         ONA_STATE.WAITING_CONTROLLER
     );
 
@@ -312,7 +1789,21 @@ function controllerConnected(
     controllerInfo = {}
 ) {
 
-    playerCountValue = 1;
+    if (addingController) {
+        playerCountValue =
+            Math.max(
+                playerCountValue + 1,
+                2
+            );
+    }
+
+    else {
+        playerCountValue =
+            Math.max(
+                playerCountValue,
+                1
+            );
+    }
 
 
     if (playerCount) {
@@ -351,11 +1842,26 @@ function controllerConnected(
         controllerInfo
     );
 
+    updateControllerLabConnection();
+    updateControllersScreen();
+
+    if (addingController) {
+
+        addingController =
+            false;
+
+        transitionTo(
+            ONA_STATE.CONTROLLERS
+        );
+
+        return;
+
+    }
 
     setTimeout(
         () => {
 
-            setState(
+            transitionTo(
                 ONA_STATE.PROFILE_SELECT
             );
 
@@ -406,25 +1912,79 @@ function updateProfileSelection() {
 
 
     const cards =
-        profileGrid.querySelectorAll(
+        Array.from(
+            profileGrid.querySelectorAll(
             ".profile-card"
+            )
         );
 
+    if (
+        !cards.some(
+            (card) =>
+                card.classList.contains("selected")
+        )
+    ) {
 
-    cards.forEach(
-        (card) => {
-
-            const player =
-                Number(
-                    card.dataset.player
-                );
-
-
-            card.classList.toggle(
-                "selected",
-                player === selectedPlayer
+        const selectedCard =
+            cards.find(
+                (card) =>
+                    Number(card.dataset.player) === selectedPlayer
             );
 
+        selectedCard
+            ?.classList
+            .add("selected");
+
+    }
+
+    const selectedIndex =
+        cards.findIndex(
+            (card) =>
+                card.classList.contains("selected")
+        );
+
+    cards.forEach(
+        (card, index) => {
+            card.classList.remove(
+                "profile-card-previous",
+                "profile-card-next",
+                "profile-card-hidden"
+            );
+
+            if (
+                selectedIndex < 0 ||
+                cards.length < 2 ||
+                index === selectedIndex
+            ) {
+                return;
+            }
+
+            const previousIndex =
+                (
+                    selectedIndex -
+                    1 +
+                    cards.length
+                ) %
+                cards.length;
+
+            const nextIndex =
+                (
+                    selectedIndex +
+                    1
+                ) %
+                cards.length;
+
+            if (index === previousIndex) {
+                card.classList.add("profile-card-previous");
+                return;
+            }
+
+            if (index === nextIndex) {
+                card.classList.add("profile-card-next");
+                return;
+            }
+
+            card.classList.add("profile-card-hidden");
         }
     );
 
@@ -456,6 +2016,15 @@ function selectProfile(card) {
 
     if (profile === "add") {
 
+        profileGrid
+            ?.querySelectorAll(".profile-card")
+            .forEach(
+                (card) =>
+                    card.classList.remove("selected")
+            );
+
+        card.classList.add("selected");
+
         console.log(
             "Add profile selected"
         );
@@ -478,6 +2047,15 @@ function selectProfile(card) {
 
     selectedPlayer =
         player;
+
+    profileGrid
+        ?.querySelectorAll(".profile-card")
+        .forEach(
+            (profileCard) =>
+                profileCard.classList.remove("selected")
+        );
+
+    card.classList.add("selected");
 
 
     currentProfile = {
@@ -511,7 +2089,7 @@ function selectProfile(card) {
     setTimeout(
         () => {
 
-            setState(
+            transitionTo(
                 ONA_STATE.MAIN_MENU
             );
 
@@ -549,6 +2127,46 @@ if (profileGrid) {
     );
 
 }
+
+importGameButton?.addEventListener(
+    "click",
+    importLocalGame
+);
+
+labDeadzone?.addEventListener(
+    "input",
+    (event) => setControllerLabDeadzone(event.target.value)
+);
+
+labSensitivity?.addEventListener(
+    "input",
+    (event) => setControllerLabSensitivity(event.target.value)
+);
+
+labCenterButton?.addEventListener(
+    "click",
+    setControllerLabCenter
+);
+
+labSaveProfileButton?.addEventListener(
+    "click",
+    saveControllerProfile
+);
+
+calibrateControllerButton?.addEventListener(
+    "click",
+    openControllerLab
+);
+
+changeProfileButton?.addEventListener(
+    "click",
+    () => transitionTo(ONA_STATE.PROFILE_SELECT)
+);
+
+addControllerButton?.addEventListener(
+    "click",
+    showAdditionalControllerQr
+);
 
 
 // =========================================================
@@ -604,19 +2222,10 @@ function navigateProfiles(direction) {
     }
 
 
-    const selectableCards =
-        cards.filter(
-            (card) =>
-                card.dataset.profile !== "add"
-        );
-
-
     let currentIndex =
-        selectableCards.findIndex(
+        cards.findIndex(
             (card) =>
-                Number(
-                    card.dataset.player
-                ) === selectedPlayer
+                card.classList.contains("selected")
         );
 
 
@@ -634,15 +2243,15 @@ function navigateProfiles(direction) {
         currentIndex < 0
     ) {
 
-        currentIndex =
-            selectableCards.length - 1;
+            currentIndex =
+            cards.length - 1;
 
     }
 
 
     if (
         currentIndex >=
-        selectableCards.length
+        cards.length
     ) {
 
         currentIndex = 0;
@@ -651,13 +2260,25 @@ function navigateProfiles(direction) {
 
 
     const card =
-        selectableCards[currentIndex];
+        cards[currentIndex];
 
 
-    selectedPlayer =
+    const player =
         Number(
             card.dataset.player
         );
+
+    if (player) {
+        selectedPlayer =
+            player;
+    }
+
+    cards.forEach(
+        (profileCard) =>
+            profileCard.classList.remove("selected")
+    );
+
+    card.classList.add("selected");
 
 
     updateProfileSelection();
@@ -711,7 +2332,7 @@ window.addEventListener(
 
                     const card =
                         profileGrid?.querySelector(
-                            `[data-player="${selectedPlayer}"]`
+                            ".profile-card.selected"
                         );
 
 
@@ -720,6 +2341,159 @@ window.addEventListener(
                         selectProfile(card);
 
                     }
+
+                    break;
+
+            }
+
+        }
+
+        if (
+            currentState ===
+            ONA_STATE.GAME_LIBRARY
+        ) {
+
+            switch (event.key) {
+
+                case "ArrowLeft":
+
+                case "ArrowUp":
+
+                    event.preventDefault();
+
+                    navigateGames(-1);
+
+                    break;
+
+
+                case "ArrowRight":
+
+                case "ArrowDown":
+
+                    event.preventDefault();
+
+                    navigateGames(1);
+
+                    break;
+
+
+                case "Enter":
+
+                case " ":
+
+                    event.preventDefault();
+
+                    launchSelectedGame();
+
+                    break;
+
+
+                case "Backspace":
+
+                    event.preventDefault();
+
+                    transitionTo(
+                        ONA_STATE.MAIN_MENU
+                    );
+
+                    break;
+
+            }
+
+        }
+
+        if (
+            currentState ===
+            ONA_STATE.CONTROLLERS
+        ) {
+
+            switch (event.key) {
+
+                case "Enter":
+
+                case " ":
+
+                    event.preventDefault();
+
+                    activateSelectedControllerAction();
+
+                    break;
+
+                case "Backspace":
+
+                    event.preventDefault();
+
+                    transitionTo(
+                        ONA_STATE.MAIN_MENU
+                    );
+
+                    break;
+
+            }
+
+        }
+
+        if (
+            currentState ===
+            ONA_STATE.CONTROLLER_LAB
+        ) {
+
+            switch (event.key) {
+
+                case "Backspace":
+
+                    event.preventDefault();
+
+                    transitionTo(
+                        ONA_STATE.CONTROLLERS
+                    );
+
+                    break;
+
+                case "Enter":
+
+                case " ":
+
+                    event.preventDefault();
+
+                    saveControllerProfile();
+
+                    break;
+
+            }
+
+        }
+
+        if (
+            currentState ===
+            ONA_STATE.QUICK_MENU
+        ) {
+
+            switch (event.key) {
+
+                case "ArrowUp":
+
+                    event.preventDefault();
+
+                    navigateSystemMenu(-1);
+
+                    break;
+
+                case "ArrowDown":
+
+                    event.preventDefault();
+
+                    navigateSystemMenu(1);
+
+                    break;
+
+                case "Enter":
+
+                case " ":
+
+                    event.preventDefault();
+
+                    activateSelectedSystemMenuItem();
 
                     break;
 
@@ -1020,7 +2794,7 @@ window.addEventListener(
 
         if (
             currentState ===
-            ONA_STATE.SYSTEM_MENU
+            ONA_STATE.QUICK_MENU
         ) {
 
             closeSystemMenu();
@@ -1047,8 +2821,11 @@ function openSystemMenu() {
     );
 
 
+    stateBeforeSystemMenu =
+        currentState;
+
     currentState =
-        ONA_STATE.SYSTEM_MENU;
+        ONA_STATE.QUICK_MENU;
 
 
     systemMenu
@@ -1066,6 +2843,17 @@ function openSystemMenu() {
         .add("mouse-enabled");
 
 
+    systemMenu
+        ?.querySelectorAll(".system-menu-item")
+        .forEach(
+            (item) =>
+                item.classList.remove("selected")
+        );
+
+    resumeButton
+        ?.classList
+        .add("selected");
+
     resumeButton?.focus();
 
 }
@@ -1075,7 +2863,7 @@ function openSystemMenu() {
 // CLOSE SYSTEM MENU
 // =========================================================
 
-function closeSystemMenu() {
+function closeSystemMenu(targetState = stateBeforeSystemMenu) {
 
     console.log(
         "Closing ONA system menu"
@@ -1097,21 +2885,9 @@ function closeSystemMenu() {
         .remove("mouse-enabled");
 
 
-    if (
-        playerCountValue > 0
-    ) {
-
-        currentState =
-            ONA_STATE.MAIN_MENU;
-
-    }
-
-    else {
-
-        currentState =
-            ONA_STATE.WAITING_CONTROLLER;
-
-    }
+    transitionTo(
+        targetState
+    );
 
 }
 
@@ -1125,6 +2901,55 @@ resumeButton?.addEventListener(
     () => {
 
         closeSystemMenu();
+
+    }
+);
+
+homeButton?.addEventListener(
+    "click",
+    () => {
+
+        closeSystemMenu(
+            ONA_STATE.HOME
+        );
+
+    }
+);
+
+quickControllersButton?.addEventListener(
+    "click",
+    () => {
+
+        closeSystemMenu(
+            ONA_STATE.CONTROLLERS
+        );
+
+    }
+);
+
+
+// =========================================================
+// MINIMIZE ONA
+// =========================================================
+
+minimizeButton?.addEventListener(
+    "click",
+    async () => {
+
+        try {
+
+            await invoke("minimize_main_window");
+
+        }
+
+        catch (error) {
+
+            console.error(
+                "Unable to minimize ONA:",
+                error
+            );
+
+        }
 
     }
 );
@@ -1245,141 +3070,30 @@ tauri.event.listen(
                 `[INPUT] JOYSTICK X: ${x.toFixed(2)} Y: ${y.toFixed(2)}`
             );
 
+            updateControllerLabStick(
+                x,
+                y
+            );
 
-            // Zona muerta
             if (
-                Math.abs(x) < 0.35 &&
-                Math.abs(y) < 0.35
+                currentState ===
+                ONA_STATE.CONTROLLER_LAB
             ) {
                 return;
             }
 
 
-            // ================================================
-            // PROFILE SELECT
-            // ================================================
-
             if (
-                currentState ===
-                ONA_STATE.PROFILE_SELECT
+            currentState === ONA_STATE.PROFILE_SELECT ||
+            currentState === ONA_STATE.MAIN_MENU ||
+            currentState === ONA_STATE.CONTROLLERS ||
+            currentState === ONA_STATE.GAME_LIBRARY ||
+            currentState === ONA_STATE.QUICK_MENU
             ) {
 
-                if (
-                    Math.abs(x) > Math.abs(y)
-                ) {
-
-                    navigateProfiles(
-                        x > 0 ? 1 : -1
-                    );
-
-                }
-
-                else {
-
-                    navigateProfiles(
-                        y > 0 ? 1 : -1
-                    );
-
-                }
-
-                return;
-            }
-
-
-            // ================================================
-            // MAIN MENU
-            // ================================================
-
-            if (
-                currentState ===
-                ONA_STATE.MAIN_MENU
-            ) {
-
-                const menuItems =
-                    Array.from(
-                        mainMenu?.querySelectorAll(
-                            ".menu-item"
-                        ) || []
-                    );
-
-
-                if (!menuItems.length) {
-                    return;
-                }
-
-
-                let selectedIndex =
-                    menuItems.findIndex(
-                        item =>
-                            item.classList.contains(
-                                "selected"
-                            )
-                    );
-
-
-                if (selectedIndex < 0) {
-                    selectedIndex = 0;
-                }
-
-
-                if (
-                    Math.abs(x) >
-                    Math.abs(y)
-                ) {
-
-                    selectedIndex +=
-                        x > 0 ? 1 : -1;
-
-                }
-
-                else {
-
-                    selectedIndex +=
-                        y > 0 ? 1 : -1;
-
-                }
-
-
-                if (
-                    selectedIndex < 0
-                ) {
-
-                    selectedIndex =
-                        menuItems.length - 1;
-
-                }
-
-
-                if (
-                    selectedIndex >=
-                    menuItems.length
-                ) {
-
-                    selectedIndex = 0;
-
-                }
-
-
-                menuItems.forEach(
-                    item =>
-                        item.classList.remove(
-                            "selected"
-                        )
-                );
-
-
-                menuItems[
-                    selectedIndex
-                ].classList.add(
-                    "selected"
-                );
-
-
-                console.log(
-                    "[MENU] Selected:",
-                    menuItems[
-                        selectedIndex
-                    ].dataset.action
+                handleUiJoystickNavigation(
+                    x,
+                    y
                 );
 
                 return;
@@ -1412,12 +3126,125 @@ tauri.event.listen(
             `[INPUT] ${button} ${state}`
         );
 
+        updateControllerLabButton(
+            button,
+            state
+        );
+
+        if (
+            currentState ===
+            ONA_STATE.CONTROLLER_LAB
+        ) {
+
+            if (
+                state !== "down" &&
+                state !== "pressed"
+            ) {
+                return;
+            }
+
+            if (
+                button === "A"
+            ) {
+
+                saveControllerProfile();
+                return;
+
+            }
+
+            if (
+                button === "B"
+            ) {
+
+                transitionTo(
+                    ONA_STATE.CONTROLLERS
+                );
+
+                return;
+
+            }
+
+            if (
+                button === "START"
+            ) {
+
+                openSystemMenu();
+                return;
+
+            }
+
+            return;
+
+        }
+
+        if (
+            currentState ===
+            ONA_STATE.QUICK_MENU
+        ) {
+
+            if (
+                state !== "down" &&
+                state !== "pressed"
+            ) {
+                return;
+            }
+
+            if (
+                button === "A"
+            ) {
+
+                activateSelectedSystemMenuItem();
+                return;
+
+            }
+
+            if (
+                button === "B"
+            ) {
+
+                closeSystemMenu();
+                return;
+
+            }
+
+            return;
+
+        }
+
 
         // Solo reaccionar al PRESIONAR
         if (
             state !== "down" &&
             state !== "pressed"
         ) {
+
+            return;
+
+        }
+
+        if (
+            currentState === ONA_STATE.WAITING_CONTROLLER &&
+            addingController &&
+            button === "B"
+        ) {
+
+            addingController =
+                false;
+
+            transitionTo(
+                ONA_STATE.CONTROLLERS
+            );
+
+            return;
+
+        }
+
+        if (
+            button === "START" &&
+            currentState !== ONA_STATE.WAITING_CONTROLLER
+        ) {
+
+            openSystemMenu();
 
             return;
 
@@ -1433,14 +3260,14 @@ tauri.event.listen(
             ONA_STATE.PROFILE_SELECT
         ) {
 
-            // A = seleccionar perfil
+            // A = select profile
             if (
                 button === "A"
             ) {
 
                 const card =
                     profileGrid?.querySelector(
-                        `[data-player="${selectedPlayer}"]`
+                        ".profile-card.selected"
                     );
 
 
@@ -1454,12 +3281,16 @@ tauri.event.listen(
             }
 
 
-            // B = regresar
+            // B = back
             if (
                 button === "B"
             ) {
 
-                setState(
+                if (playerCountValue > 0) {
+                    return;
+                }
+
+                transitionTo(
                     ONA_STATE.WAITING_CONTROLLER
                 );
 
@@ -1514,7 +3345,7 @@ tauri.event.listen(
             }
 
 
-            // A = activar opción
+            // A = activate option
             if (
                 button === "A"
             ) {
@@ -1539,8 +3370,49 @@ tauri.event.listen(
                         === "play"
                     ) {
 
-                        console.log(
-                            "[ONA] PLAY selected"
+                        if (installedGames.length) {
+                            launchSelectedGame();
+                        }
+                        else {
+                            transitionTo(
+                                ONA_STATE.GAME_LIBRARY
+                            );
+                        }
+
+                    }
+
+
+                    // RECENT GAME
+                    if (
+                        selected.dataset.action
+                        === "recent"
+                    ) {
+
+                        const gameIndex =
+                            Number(
+                                selected.dataset.gameIndex
+                            );
+
+                        if (
+                            Number.isInteger(gameIndex)
+                        ) {
+                            selectedGameIndex =
+                                gameIndex;
+                        }
+
+                        launchSelectedGame();
+
+                    }
+
+
+                    // GAME LIBRARY
+                    if (
+                        selected.dataset.action
+                        === "library"
+                    ) {
+
+                        transitionTo(
+                            ONA_STATE.GAME_LIBRARY
                         );
 
                     }
@@ -1552,8 +3424,21 @@ tauri.event.listen(
                         === "controllers"
                     ) {
 
-                        setState(
-                            ONA_STATE.WAITING_CONTROLLER
+                        transitionTo(
+                            ONA_STATE.CONTROLLERS
+                        );
+
+                    }
+
+
+                    // SETTINGS
+                    if (
+                        selected.dataset.action
+                        === "settings"
+                    ) {
+
+                        console.log(
+                            "[ONA] Settings selected"
                         );
 
                     }
@@ -1564,14 +3449,12 @@ tauri.event.listen(
             }
 
 
-            // B = volver a perfiles
+            // B = back to profiles
             if (
                 button === "B"
             ) {
 
-                setState(
-                    ONA_STATE.PROFILE_SELECT
-                );
+                return;
 
                 return;
 
@@ -1657,6 +3540,85 @@ tauri.event.listen(
 
         }
 
+
+        // =====================================================
+        // CONTROLLERS
+        // =====================================================
+
+        if (
+            currentState ===
+            ONA_STATE.CONTROLLERS
+        ) {
+
+            if (
+                button === "A"
+            ) {
+
+                activateSelectedControllerAction();
+                return;
+
+            }
+
+            if (
+                button === "B"
+            ) {
+
+                transitionTo(
+                    ONA_STATE.MAIN_MENU
+                );
+
+                return;
+
+            }
+
+            return;
+
+        }
+
+
+        // =====================================================
+        // GAME LIBRARY
+        // =====================================================
+
+        if (
+            currentState ===
+            ONA_STATE.GAME_LIBRARY
+        ) {
+
+            if (
+                button === "A"
+            ) {
+
+                launchSelectedGame();
+                return;
+
+            }
+
+            if (
+                button === "B"
+            ) {
+
+                transitionTo(
+                    ONA_STATE.MAIN_MENU
+                );
+
+                return;
+
+            }
+
+            if (
+                button === "START"
+            ) {
+
+                openSystemMenu();
+                return;
+
+            }
+
+            return;
+
+        }
+
     }
 );
 
@@ -1698,7 +3660,7 @@ window.onaDebugReset =
         if (connectionText) {
 
             connectionText.textContent =
-                "WAITING FOR PLAYER 1";
+                "WAITING FOR CONTROLLER";
 
         }
 
@@ -1706,7 +3668,7 @@ window.onaDebugReset =
         if (controllerStatus) {
 
             controllerStatus.textContent =
-                "Connect your ONA Controller to begin.";
+                "Scan the QR code with your phone to begin.";
 
         }
 
@@ -1717,6 +3679,10 @@ window.onaDebugReset =
                 "0 / 10";
 
         }
+
+        updateControllerLabConnection();
+
+        updateControllersScreen();
 
 
         setState(
@@ -1733,6 +3699,10 @@ window.onaDebugReset =
 console.log(
     "ONA Gaming Studio Shell initialized."
 );
+
+renderControllerLabButtons();
+
+loadControllerProfile();
 
 
 startIntro();

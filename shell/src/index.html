@@ -99,9 +99,18 @@
 
         <div class="controller-content">
 
-            <div class="controller-symbol">
-                ONA
-            </div>
+            <div class="controller-frame-detail frame-detail-top-left"></div>
+            <div class="controller-frame-detail frame-detail-top-right"></div>
+            <div class="controller-frame-detail frame-detail-bottom-left"></div>
+            <div class="controller-frame-detail frame-detail-bottom-right"></div>
+            <div class="controller-frame-light frame-light-top-a"></div>
+            <div class="controller-frame-light frame-light-top-b"></div>
+            <div class="controller-frame-light frame-light-left-a"></div>
+            <div class="controller-frame-light frame-light-left-b"></div>
+            <div class="controller-frame-light frame-light-right-a"></div>
+            <div class="controller-frame-light frame-light-right-b"></div>
+            <div class="controller-frame-light frame-light-bottom-a"></div>
+            <div class="controller-frame-light frame-light-bottom-b"></div>
 
 
             <div class="eyebrow">
@@ -116,8 +125,7 @@
 
 
             <p id="controller-status">
-                Connect your ONA Controller
-                to begin.
+                Scan the QR code with your phone to begin.
             </p>
 
 
@@ -137,7 +145,7 @@
 
 
                 <span id="connection-text">
-                    WAITING FOR PLAYER 1
+                    WAITING FOR CONTROLLER
                 </span>
 
             </div>
@@ -161,7 +169,7 @@
 
 
                 <div class="qr-label">
-                    SCAN TO CONNECT
+                    Scan to connect
                 </div>
 
             </div>
@@ -171,7 +179,7 @@
                 id="connection-hint"
                 class="connection-hint"
             >
-                ONA CONTROLLER PROTOCOL
+                Scan to connect
             </div>
 
         </div>
@@ -192,19 +200,18 @@
         <div class="profile-content">
 
 
-            <div class="eyebrow">
-                ONA GAMING STUDIO
+            <div class="profile-top-plate">
+                ONA / A GAMING STUDIO
             </div>
 
 
             <h1>
-                WHO'S
-                <span>PLAYING?</span>
+                WHO'S PLAYING?
             </h1>
 
 
             <p class="profile-subtitle">
-                Select a player profile
+                Select your profile to start.
             </p>
 
 
@@ -360,11 +367,11 @@
             <div class="profile-footer">
 
                 <span>
-                    CONTROLLER
+                    PLAYER
                 </span>
 
                 <span class="profile-footer-divider">
-                    /
+                    |
                 </span>
 
                 <span id="profile-player-number">
@@ -391,58 +398,34 @@
         <div class="menu-content">
 
 
-            <div class="eyebrow">
-                OPEN NETWORK ARCHITECTURE
-            </div>
+            <div class="home-topbar">
 
+                <div class="home-brand-mark">
+                    ONA
+                </div>
 
-            <h1>
-                PLAY
-                <span>WITHOUT LIMITS</span>
-            </h1>
-
-
-            <p>
-                Your gaming environment is ready.
-            </p>
-
-
-
-            <!-- =========================================
-                 CURRENT PROFILE
-            ========================================== -->
-
-            <div
-                id="current-profile"
-                class="current-profile"
-            >
+                <div class="home-studio-mark">
+                    ONA / A GAMING STUDIO
+                </div>
 
                 <div
-                    id="current-profile-avatar"
-                    class="current-profile-avatar"
+                    id="home-player-chip"
+                    class="home-player-chip"
                 >
-                    P1
-                </div>
-
-
-                <div class="current-profile-info">
-
-                    <span class="current-profile-label">
-                        PLAYING AS
-                    </span>
-
-
                     <span
-                        id="current-profile-name"
-                        class="current-profile-name"
+                        id="home-player-avatar"
+                        class="home-player-avatar"
                     >
-                        PLAYER 1
+                        P1
                     </span>
 
+                    <span>
+                        <strong id="home-player-name">PLAYER 1</strong>
+                        <small>ONLINE</small>
+                    </span>
                 </div>
 
             </div>
-
 
 
             <!-- =========================================
@@ -452,36 +435,469 @@
             <div class="menu-grid">
 
                 <button
-                    class="menu-item selected"
+                    id="home-continue-card"
+                    class="menu-item home-continue-card selected"
                     data-action="play"
                 >
-                    PLAY
+                    <span class="home-card-kicker">
+                        CONTINUE
+                    </span>
+
+                    <span
+                        id="home-continue-title"
+                        class="home-continue-title"
+                    >
+                        YOUR LIBRARY IS READY
+                    </span>
+
+                    <span
+                        id="home-continue-meta"
+                        class="home-continue-meta"
+                    >
+                        Add your first game to start playing.
+                    </span>
+
+                    <span
+                        id="home-continue-action"
+                        class="home-play-now"
+                    >
+                        GAME LIBRARY
+                    </span>
                 </button>
 
+                <div class="home-section-title">
+                    RECENTLY PLAYED
+                </div>
+
+                <div
+                    id="home-recent-row"
+                    class="home-recent-row"
+                    aria-live="polite"
+                ></div>
 
                 <button
-                    class="menu-item"
+                    class="menu-item home-system-card"
                     data-action="library"
                 >
-                    GAME LIBRARY
+                    <span class="home-system-icon">LIB</span>
+                    <span>
+                        <strong>GAME LIBRARY</strong>
+                        <small>Browse and play your games</small>
+                    </span>
                 </button>
 
 
                 <button
-                    class="menu-item"
+                    class="menu-item home-system-card"
                     data-action="controllers"
                 >
-                    CONTROLLERS
+                    <span class="home-system-icon">CTL</span>
+                    <span>
+                        <strong>CONTROLLERS</strong>
+                        <small>Players, controllers and calibration</small>
+                    </span>
                 </button>
 
 
                 <button
-                    class="menu-item"
+                    class="menu-item home-system-card"
                     data-action="settings"
                 >
-                    SETTINGS
+                    <span class="home-system-icon">SYS</span>
+                    <span>
+                        <strong>SETTINGS</strong>
+                        <small>System, display, audio and personalization</small>
+                    </span>
                 </button>
 
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- =================================================
+         CONTROLLERS
+    ================================================== -->
+
+    <section
+        id="controllers-screen"
+        class="screen"
+    >
+
+        <div class="controllers-content">
+
+            <div class="library-header">
+
+                <div>
+
+                    <div class="eyebrow">
+                        ONA PLAYERS
+                    </div>
+
+                    <h1>
+                        PLAYERS
+                        <span>& CONTROLLERS</span>
+                    </h1>
+
+                </div>
+
+            </div>
+
+            <div class="controllers-panel">
+
+                <button
+                    id="change-profile-button"
+                    class="controller-slot selected"
+                    data-controller-action="profile"
+                >
+
+                    <div class="controller-slot-player">
+                        P1
+                    </div>
+
+                    <div class="controller-slot-info">
+
+                        <div class="controller-slot-name">
+                            PLAYER 1 CONTROLLER
+                        </div>
+
+                        <div
+                            id="controllers-status"
+                            class="controller-slot-status"
+                        >
+                            CONTROLLER CONNECTED
+                        </div>
+
+                    </div>
+
+                    <div class="controller-calibrate-action">
+                        CHANGE PROFILE
+                    </div>
+
+                </button>
+
+                <button
+                    id="add-controller-button"
+                    class="controller-slot"
+                    data-controller-action="add"
+                >
+
+                    <div class="controller-slot-player">
+                        +
+                    </div>
+
+                    <div class="controller-slot-info">
+
+                        <div class="controller-slot-name">
+                            ADD CONTROLLER
+                        </div>
+
+                        <div class="controller-slot-status">
+                            PAIRING QR
+                        </div>
+
+                    </div>
+
+                    <div class="controller-calibrate-action">
+                        OPEN QR
+                    </div>
+
+                </button>
+
+                <button
+                    id="calibrate-controller-button"
+                    class="controller-slot"
+                    data-controller-action="calibrate"
+                >
+
+                    <div class="controller-slot-player">
+                        P1
+                    </div>
+
+                    <div class="controller-slot-info">
+
+                        <div class="controller-slot-name">
+                            CALIBRATE CONTROLLER
+                        </div>
+
+                        <div class="controller-slot-status">
+                            CONTROLLER LAB
+                        </div>
+
+                    </div>
+
+                    <div
+                        class="controller-calibrate-action"
+                    >
+                        CALIBRATE CONTROLLER
+                    </div>
+
+                </button>
+
+            </div>
+
+            <div class="library-footer">
+                <span>A SELECT</span>
+                <span>B BACK</span>
+                <span>START QUICK MENU</span>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- =================================================
+         GAME LIBRARY
+    ================================================== -->
+
+    <section
+        id="game-library-screen"
+        class="screen"
+    >
+
+        <div class="library-content">
+
+            <div class="library-header">
+
+                <div>
+
+                    <div class="eyebrow">
+                        ONA GAME LIBRARY
+                    </div>
+
+                    <h1>
+                        YOUR
+                        <span>GAMES</span>
+                    </h1>
+
+                </div>
+
+                <button
+                    id="import-game-button"
+                    class="library-action"
+                >
+                    IMPORT GAME
+                </button>
+
+            </div>
+
+            <div
+                id="library-status"
+                class="library-status"
+            >
+                Loading installed games.
+            </div>
+
+            <div
+                id="game-grid"
+                class="game-grid"
+            >
+            </div>
+
+            <div class="library-footer">
+                <span>A PLAY</span>
+                <span>B BACK</span>
+                <span>START QUICK MENU</span>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- =================================================
+         CONTROLLER LAB
+    ================================================== -->
+
+    <section
+        id="controller-lab-screen"
+        class="screen"
+    >
+
+        <div class="controller-lab-content">
+
+            <div class="lab-header">
+
+                <div>
+
+                    <div class="eyebrow">
+                        ONA CONTROLLER
+                    </div>
+
+                    <h1>
+                        CONTROLLER
+                        <span>LAB</span>
+                    </h1>
+
+                </div>
+
+                <div class="lab-connection">
+
+                    <span
+                        id="lab-connection-dot"
+                        class="lab-connection-dot"
+                    ></span>
+
+                    <span id="lab-connection-text">
+                        WAITING
+                    </span>
+
+                </div>
+
+            </div>
+
+            <div class="lab-grid">
+
+                <section class="lab-panel lab-stick-panel">
+
+                    <div class="lab-panel-title">
+                        JOYSTICK
+                    </div>
+
+                    <div class="stick-stage">
+
+                        <div class="stick-ring">
+
+                            <div class="stick-cross stick-cross-x"></div>
+                            <div class="stick-cross stick-cross-y"></div>
+
+                            <div
+                                id="lab-stick-dot"
+                                class="stick-dot"
+                            ></div>
+
+                        </div>
+
+                    </div>
+
+                    <div class="stick-readout">
+
+                        <span>
+                            X
+                            <strong id="lab-stick-x">0.00</strong>
+                        </span>
+
+                        <span>
+                            Y
+                            <strong id="lab-stick-y">0.00</strong>
+                        </span>
+
+                    </div>
+
+                    <div class="lab-calibration">
+
+                        <div class="lab-panel-title">
+                            CALIBRATION
+                        </div>
+
+                        <label class="lab-field">
+                            DEADZONE
+                            <input
+                                id="lab-deadzone"
+                                type="range"
+                                min="0"
+                                max="0.5"
+                                step="0.01"
+                            >
+                            <span id="lab-deadzone-value">0.12</span>
+                        </label>
+
+                        <label class="lab-field">
+                            SENSITIVITY
+                            <input
+                                id="lab-sensitivity"
+                                type="range"
+                                min="0.5"
+                                max="2"
+                                step="0.05"
+                            >
+                            <span id="lab-sensitivity-value">1.00</span>
+                        </label>
+
+                        <div class="lab-actions">
+
+                            <button
+                                id="lab-center-button"
+                                class="lab-action"
+                            >
+                                SET CENTER
+                            </button>
+
+                            <button
+                                id="lab-save-profile-button"
+                                class="lab-action"
+                            >
+                                SAVE PROFILE
+                            </button>
+
+                        </div>
+
+                    </div>
+
+                </section>
+
+                <section class="lab-panel">
+
+                    <div class="lab-panel-title">
+                        TEST BUTTONS
+                    </div>
+
+                    <p class="lab-instruction">
+                        Press any Controller button.
+                    </p>
+
+                    <div
+                        id="lab-buttons"
+                        class="lab-buttons"
+                    ></div>
+
+                </section>
+
+                <section class="lab-panel lab-profile-panel">
+
+                    <div class="lab-panel-title">
+                        PROFILE
+                    </div>
+
+                    <div class="profile-readout">
+
+                        <span>NAME</span>
+                        <strong id="lab-profile-name">Default</strong>
+
+                    </div>
+
+                    <div class="profile-readout">
+
+                        <span>LAST INPUT</span>
+                        <strong id="lab-last-input">NONE</strong>
+
+                    </div>
+
+                    <div class="profile-readout">
+
+                        <span>BRIDGE</span>
+                        <strong id="lab-bridge-status">UNKNOWN</strong>
+
+                    </div>
+
+                    <p
+                        id="lab-save-status"
+                        class="lab-save-status"
+                    >
+                        Profile ready.
+                    </p>
+
+                </section>
+
+            </div>
+
+            <div class="lab-footer">
+                <span>A SAVE</span>
+                <span>B BACK</span>
+                <span>START QUICK MENU</span>
             </div>
 
         </div>
@@ -503,7 +919,7 @@
 
 
             <div class="system-menu-title">
-                ONA SYSTEM
+                QUICK MENU
             </div>
 
 
@@ -511,7 +927,31 @@
                 id="resume-button"
                 class="system-menu-item selected"
             >
-                RESUME ONA
+                BACK
+            </button>
+
+
+            <button
+                id="home-button"
+                class="system-menu-item"
+            >
+                HOME
+            </button>
+
+
+            <button
+                id="quick-controllers-button"
+                class="system-menu-item"
+            >
+                PLAYERS & CONTROLLERS
+            </button>
+
+
+            <button
+                id="minimize-button"
+                class="system-menu-item"
+            >
+                MINIMIZE ONA
             </button>
 
 
@@ -527,8 +967,9 @@
                 id="exit-button"
                 class="system-menu-item"
             >
-                EXIT TO WINDOWS
+                EXIT ONA
             </button>
+
 
         </div>
 

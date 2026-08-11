@@ -66,50 +66,32 @@ async fn handle_socket(mut socket: WebSocket) {
                     .send(Message::Text(format!("ONA_ACK: {}", text).into()))
                     .await
                 {
-                    println!(
-                        "[WEBSOCKET] Send error: {}",
-                        error
-                    );
+                    println!("[WEBSOCKET] Send error: {}", error);
 
                     break;
                 }
             }
 
             Ok(Message::Binary(data)) => {
-                println!(
-                    "[WEBSOCKET] Binary message received: {} bytes",
-                    data.len()
-                );
+                println!("[WEBSOCKET] Binary message received: {} bytes", data.len());
             }
 
             Ok(Message::Ping(data)) => {
-                println!(
-                    "[WEBSOCKET] Ping received: {} bytes",
-                    data.len()
-                );
+                println!("[WEBSOCKET] Ping received: {} bytes", data.len());
             }
 
             Ok(Message::Pong(data)) => {
-                println!(
-                    "[WEBSOCKET] Pong received: {} bytes",
-                    data.len()
-                );
+                println!("[WEBSOCKET] Pong received: {} bytes", data.len());
             }
 
             Ok(Message::Close(frame)) => {
-                println!(
-                    "[WEBSOCKET] Controller disconnected: {:?}",
-                    frame
-                );
+                println!("[WEBSOCKET] Controller disconnected: {:?}", frame);
 
                 break;
             }
 
             Err(error) => {
-                println!(
-                    "[WEBSOCKET] Connection error: {}",
-                    error
-                );
+                println!("[WEBSOCKET] Connection error: {}", error);
 
                 break;
             }
