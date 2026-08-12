@@ -13,7 +13,10 @@ use ona_core::input::{
     events::normalize_controller_json,
     profile::OnaControllerProfile,
 };
-use ona_core::launcher::{process::GameLauncher, state::RunningGameStatus};
+use ona_core::launcher::{
+    process::{GameLauncher, OnaGameRuntimeContext},
+    state::RunningGameStatus,
+};
 use ona_core::qr::generator::{generate, generate_svg};
 use ona_core::session::manager::create_session;
 use serde::{Deserialize, Serialize};
@@ -224,7 +227,20 @@ fn launch_installed_game(
         .get_game(&game_id)
         .map_err(|error| error.to_string())?;
 
-    runtime.launcher.launch(&profile)
+    let bridge_status = runtime
+        .input_bridge
+        .lock()
+        .map_err(|error| error.to_string())?
+        .status();
+
+    runtime.launcher.launch_with_runtime(
+        &profile,
+        OnaGameRuntimeContext {
+            input_host: bridge_status.host,
+            input_port: bridge_status.port,
+            player_id: None,
+        },
+    )
 }
 
 #[tauri::command]

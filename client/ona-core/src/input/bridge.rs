@@ -14,12 +14,16 @@ use super::events::OnaInputEvent;
 pub struct GameInputBridgeStatus {
     pub running: bool,
     pub address: String,
+    pub host: String,
+    pub port: u16,
     pub connected_clients: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct GameInputBridge {
     address: String,
+    host: String,
+    port: u16,
     clients: Arc<Mutex<Vec<TcpStream>>>,
     running: Arc<Mutex<bool>>,
 }
@@ -27,10 +31,10 @@ pub struct GameInputBridge {
 impl GameInputBridge {
     pub fn start_localhost(port: u16) -> Result<Self, String> {
         let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|error| error.to_string())?;
-        let address = listener
-            .local_addr()
-            .map_err(|error| error.to_string())?
-            .to_string();
+        let local_addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let address = local_addr.to_string();
+        let host = local_addr.ip().to_string();
+        let port = local_addr.port();
 
         let clients = Arc::new(Mutex::new(Vec::new()));
         let running = Arc::new(Mutex::new(true));
@@ -61,6 +65,8 @@ impl GameInputBridge {
 
         Ok(Self {
             address,
+            host,
+            port,
             clients,
             running,
         })
@@ -82,6 +88,8 @@ impl GameInputBridge {
         GameInputBridgeStatus {
             running: self.running.lock().map(|running| *running).unwrap_or(false),
             address: self.address.clone(),
+            host: self.host.clone(),
+            port: self.port,
             connected_clients: self
                 .clients
                 .lock()

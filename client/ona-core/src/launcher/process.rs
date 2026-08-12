@@ -7,6 +7,15 @@ use crate::{game_manager::profile::GameProfile, runtime::lifecycle::GameLifecycl
 
 use super::state::RunningGameStatus;
 
+pub const ONA_RUNTIME_PROTOCOL_VERSION: &str = "1";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OnaGameRuntimeContext {
+    pub input_host: String,
+    pub input_port: u16,
+    pub player_id: Option<u8>,
+}
+
 #[derive(Debug)]
 pub struct GameLauncher {
     child: Arc<Mutex<Option<Child>>>,
@@ -28,6 +37,22 @@ impl GameLauncher {
     }
 
     pub fn launch(&self, profile: &GameProfile) -> Result<RunningGameStatus, String> {
+        self.launch_internal(profile, None)
+    }
+
+    pub fn launch_with_runtime(
+        &self,
+        profile: &GameProfile,
+        runtime: OnaGameRuntimeContext,
+    ) -> Result<RunningGameStatus, String> {
+        self.launch_internal(profile, Some(runtime))
+    }
+
+    fn launch_internal(
+        &self,
+        profile: &GameProfile,
+        runtime: Option<OnaGameRuntimeContext>,
+    ) -> Result<RunningGameStatus, String> {
         self.refresh_status();
 
         if self
@@ -54,6 +79,10 @@ impl GameLauncher {
         command
             .current_dir(&profile.working_directory)
             .args(&profile.arguments);
+
+        if let Some(runtime) = runtime {
+            apply_ona_runtime_environment(&mut command, &runtime);
+        }
 
         let child = command.spawn().map_err(|error| {
             set_status(
@@ -161,6 +190,18 @@ impl GameLauncher {
                 set_status(&self.status, status);
             }
         }
+    }
+}
+
+fn apply_ona_runtime_environment(command: &mut Command, runtime: &OnaGameRuntimeContext) {
+    command
+        .env("ONA_RUNTIME", "1")
+        .env("ONA_PROTOCOL_VERSION", ONA_RUNTIME_PROTOCOL_VERSION)
+        .env("ONA_INPUT_HOST", &runtime.input_host)
+        .env("ONA_INPUT_PORT", runtime.input_port.to_string());
+
+    if let Some(player_id) = runtime.player_id {
+        command.env("ONA_PLAYER_ID", player_id.to_string());
     }
 }
 
