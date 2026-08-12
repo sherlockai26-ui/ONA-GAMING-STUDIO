@@ -146,6 +146,51 @@ const libraryStatus =
 const gameGrid =
     document.getElementById("game-grid");
 
+const importGameOverlay =
+    document.getElementById("import-game-overlay");
+
+const importSourceCount =
+    document.getElementById("import-source-count");
+
+const importStatus =
+    document.getElementById("import-status");
+
+const importResults =
+    document.getElementById("import-results");
+
+const importDetails =
+    document.getElementById("import-details");
+
+const importActions =
+    document.getElementById("import-actions");
+
+const gameLifecycleOverlay =
+    document.getElementById("game-lifecycle-overlay");
+
+const gameLifecycleTitle =
+    document.getElementById("game-lifecycle-title");
+
+const gameLifecycleName =
+    document.getElementById("game-lifecycle-name");
+
+const gameLifecycleStatus =
+    document.getElementById("game-lifecycle-status");
+
+const gameLifecycleDetails =
+    document.getElementById("game-lifecycle-details");
+
+const gameOptionsOverlay =
+    document.getElementById("game-options-overlay");
+
+const gameOptionsTitle =
+    document.getElementById("game-options-title");
+
+const gameOptionsStatus =
+    document.getElementById("game-options-status");
+
+const gameOptionsDetails =
+    document.getElementById("game-options-details");
+
 const controllersStatus =
     document.getElementById("controllers-status");
 
@@ -304,6 +349,36 @@ let currentProfile = {
 let installedGames = [];
 
 let selectedGameIndex = 0;
+
+let importBrowserOpen =
+    false;
+
+let importBrowserState =
+    "idle";
+
+let scannedInstallPackages = [];
+
+let invalidInstallPackages = [];
+
+let selectedInstallPackageIndex = 0;
+
+let installedPackageProfile =
+    null;
+
+let gameOptionsOpen =
+    false;
+
+let gameOptionsMode =
+    "menu";
+
+let selectedOptionsGame =
+    null;
+
+let runningGamePollTimer =
+    null;
+
+let runningGameId =
+    null;
 
 let addingController =
     false;
@@ -1444,7 +1519,7 @@ function renderGameLibrary() {
                     <div class="game-description">${escapeHtml(game.description || "")}</div>
                     <div class="game-state">${game.installed ? "INSTALLED" : "NOT INSTALLED"}</div>
                 </div>
-                <div class="game-play-label">PLAY</div>`;
+                <div class="game-play-label">A PLAY / X OPTIONS</div>`;
 
             card.addEventListener(
                 "click",
@@ -1712,6 +1787,11 @@ function moveUiSelection(direction) {
             ? -1
             : 1;
 
+    if (importBrowserOpen) {
+        navigateInstallPackages(step);
+        return;
+    }
+
     if (
         currentState ===
         ONA_STATE.PROFILE_SELECT
@@ -1786,19 +1866,498 @@ function moveUiSelection(direction) {
 
 async function importLocalGame() {
 
-    const sourceDir =
-        window.prompt(
-            "Paste the local game package folder path:"
+    openImportBrowser();
+
+}
+
+
+function openImportBrowser() {
+
+    importBrowserOpen =
+        true;
+
+    importGameOverlay
+        ?.classList
+        .add("visible");
+
+    scanInstallSources();
+
+}
+
+
+function closeImportBrowser() {
+
+    importBrowserOpen =
+        false;
+
+    importGameOverlay
+        ?.classList
+        .remove("visible");
+
+    importBrowserState =
+        "idle";
+
+    installedPackageProfile =
+        null;
+
+    if (importDetails) {
+        importDetails.hidden =
+            true;
+        importDetails.textContent =
+            "";
+    }
+
+}
+
+
+async function scanInstallSources() {
+
+    importBrowserState =
+        "scanning";
+
+    scannedInstallPackages =
+        [];
+
+    invalidInstallPackages =
+        [];
+
+    selectedInstallPackageIndex =
+        0;
+
+    installedPackageProfile =
+        null;
+
+    renderImportBrowser();
+
+    try {
+
+        const report =
+            await invoke(
+                "scan_game_installation_sources"
+            );
+
+        scannedInstallPackages =
+            Array.isArray(report?.games)
+                ? report.games
+                : [];
+
+        invalidInstallPackages =
+            Array.isArray(report?.invalidPackages)
+                ? report.invalidPackages
+                : [];
+
+        importBrowserState =
+            scannedInstallPackages.length
+                ? "found"
+                : "empty";
+
+        renderImportBrowser(report);
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "[ONA Import] Scan failed:",
+            error
         );
 
-    if (!sourceDir) {
+        importBrowserState =
+            "error";
+
+        invalidInstallPackages =
+            [
+                {
+                    error:
+                        String(error)
+                }
+            ];
+
+        renderImportBrowser();
+
+    }
+
+}
+
+
+function renderImportBrowser(report = {}) {
+
+    if (!importGameOverlay) {
+        return;
+    }
+
+    const sourceCount =
+        Number(report?.sources?.length || 0);
+
+    if (importSourceCount) {
+        importSourceCount.textContent =
+            importBrowserState === "scanning"
+                ? "SCANNING"
+                : `${sourceCount} SOURCE${sourceCount === 1 ? "" : "S"}`;
+    }
+
+    if (importResults) {
+        importResults.innerHTML =
+            "";
+    }
+
+    if (importDetails) {
+        importDetails.hidden =
+            true;
+        importDetails.textContent =
+            "";
+    }
+
+    switch (importBrowserState) {
+
+        case "scanning":
+
+            setImportStatus(
+                "SEARCHING FOR ONA GAMES..."
+            );
+
+            renderImportMessage(
+                "SCANNING EXTERNAL STORAGE",
+                "Looking for ONA Library on available drives."
+            );
+
+            setImportActions(
+                ["B BACK"]
+            );
+
+            return;
+
+        case "empty":
+
+            setImportStatus(
+                "NO ONA GAMES FOUND"
+            );
+
+            renderImportMessage(
+                "INSERT A USB DRIVE",
+                "ONA is looking for a folder named ONA Library."
+            );
+
+            setImportActions(
+                ["A SCAN AGAIN", "B BACK"]
+            );
+
+            renderInvalidPackageDetails();
+
+            return;
+
+        case "installing":
+
+            setImportStatus(
+                `INSTALLING ${selectedInstallPackage()?.name || "GAME"}`
+            );
+
+            renderImportMessage(
+                "INSTALLING...",
+                "Copying game files to ONA local storage."
+            );
+
+            setImportActions(
+                []
+            );
+
+            return;
+
+        case "installed":
+
+            setImportStatus(
+                `${installedPackageProfile?.name || "GAME"} INSTALLED SUCCESSFULLY`
+            );
+
+            renderImportMessage(
+                "INSTALL COMPLETE",
+                "The game is now available in your ONA Game Library."
+            );
+
+            setImportActions(
+                ["A PLAY", "B BACK TO LIBRARY"]
+            );
+
+            return;
+
+        case "package-error":
+
+        case "error":
+
+            setImportStatus(
+                "THIS GAME PACKAGE COULD NOT BE INSTALLED"
+            );
+
+            renderImportMessage(
+                "PACKAGE NOT COMPATIBLE",
+                "The package is not compatible with this version of ONA."
+            );
+
+            setImportActions(
+                ["A DETAILS", "B BACK"]
+            );
+
+            return;
+
+        default:
+
+            setImportStatus(
+                `${scannedInstallPackages.length} ONA GAME${scannedInstallPackages.length === 1 ? "" : "S"} FOUND`
+            );
+
+            renderInstallPackageCards();
+
+            setImportActions(
+                ["A INSTALL", "B BACK"]
+            );
+
+            renderInvalidPackageDetails();
+
+            return;
+
+    }
+
+}
+
+
+function setImportStatus(text) {
+
+    if (importStatus) {
+        importStatus.textContent =
+            text;
+    }
+
+}
+
+
+function setImportActions(actions) {
+
+    if (!importActions) {
+        return;
+    }
+
+    importActions.innerHTML =
+        actions
+            .map((action) => `<span>${escapeHtml(action)}</span>`)
+            .join("");
+
+}
+
+
+function renderImportMessage(title, copy) {
+
+    if (!importResults) {
+        return;
+    }
+
+    importResults.innerHTML =
+        `<div class="import-message">
+            <div class="import-pulse"></div>
+            <strong>${escapeHtml(title)}</strong>
+            <span>${escapeHtml(copy)}</span>
+        </div>`;
+
+}
+
+
+function renderInstallPackageCards() {
+
+    if (!importResults) {
+        return;
+    }
+
+    scannedInstallPackages.forEach(
+        (game, index) => {
+
+            const card =
+                document.createElement("button");
+
+            card.className =
+                "import-game-card";
+
+            card.classList.toggle(
+                "selected",
+                index === selectedInstallPackageIndex
+            );
+
+            card.classList.toggle(
+                "disabled",
+                Boolean(game.alreadyInstalled)
+            );
+
+            const iconMarkup =
+                game.icon
+                    ? `<img class="import-game-icon" src="${escapeAttribute(game.icon)}" alt="">`
+                    : `<div class="import-game-icon import-game-icon-placeholder">${escapeHtml(game.name?.slice(0, 2) || "ON")}</div>`;
+
+            card.innerHTML =
+                `${iconMarkup}
+                <div class="import-game-info">
+                    <span class="import-game-source">${escapeHtml(game.sourceName || "EXTERNAL STORAGE")}</span>
+                    <strong>${escapeHtml(game.name || "Untitled Game")}</strong>
+                    <span>${escapeHtml(game.gameId || "")}</span>
+                    <span>VERSION ${escapeHtml(game.version || "0.0.0")}</span>
+                    <span>${game.alreadyInstalled ? "GAME ALREADY INSTALLED" : "ONA COMPATIBLE"}</span>
+                    <em>${game.alreadyInstalled ? "INSTALLED" : "READY TO INSTALL"}</em>
+                </div>`;
+
+            card.addEventListener(
+                "click",
+                () => {
+                    selectedInstallPackageIndex =
+                        index;
+                    renderImportBrowser({
+                        sources:
+                            []
+                    });
+                }
+            );
+
+            importResults.appendChild(card);
+
+        }
+    );
+
+}
+
+
+function renderInvalidPackageDetails() {
+
+    if (
+        !importDetails ||
+        !invalidInstallPackages.length
+    ) {
+        return;
+    }
+
+    importDetails.hidden =
+        false;
+
+    importDetails.textContent =
+        `Developer details: ${invalidInstallPackages.length} incompatible package${invalidInstallPackages.length === 1 ? "" : "s"} ignored.`;
+
+}
+
+
+function selectedInstallPackage() {
+
+    return scannedInstallPackages[
+        selectedInstallPackageIndex
+    ];
+
+}
+
+
+function navigateInstallPackages(direction) {
+
+    if (
+        !importBrowserOpen ||
+        importBrowserState !== "found" ||
+        !scannedInstallPackages.length
+    ) {
+        return;
+    }
+
+    selectedInstallPackageIndex += direction;
+
+    if (selectedInstallPackageIndex < 0) {
+        selectedInstallPackageIndex =
+            scannedInstallPackages.length - 1;
+    }
+
+    if (
+        selectedInstallPackageIndex >=
+        scannedInstallPackages.length
+    ) {
+        selectedInstallPackageIndex =
+            0;
+    }
+
+    renderImportBrowser();
+
+}
+
+
+async function activateImportBrowser() {
+
+    if (!importBrowserOpen) {
+        return;
+    }
+
+    if (
+        importBrowserState === "empty"
+    ) {
+        scanInstallSources();
+        return;
+    }
+
+    if (
+        importBrowserState === "installed"
+    ) {
+        if (installedPackageProfile?.id) {
+            closeImportBrowser();
+            await loadGameLibrary();
+            selectedGameIndex =
+                installedGames.findIndex(
+                    (game) =>
+                        game.id === installedPackageProfile.id
+                );
+
+            if (selectedGameIndex < 0) {
+                selectedGameIndex =
+                    0;
+            }
+
+            launchSelectedGame();
+        }
+
+        return;
+    }
+
+    if (
+        importBrowserState === "error" ||
+        importBrowserState === "package-error"
+    ) {
+        showImportDeveloperDetails();
+        return;
+    }
+
+    if (
+        importBrowserState !== "found"
+    ) {
+        return;
+    }
+
+    const game =
+        selectedInstallPackage();
+
+    if (!game) {
+        return;
+    }
+
+    if (game.alreadyInstalled) {
+        importBrowserState =
+            "package-error";
+        invalidInstallPackages =
+            [
+                {
+                    error:
+                        "Game already installed. ONA Runtime V1 does not support updates yet."
+                }
+            ];
+        renderImportBrowser();
         return;
     }
 
     if (libraryStatus) {
         libraryStatus.textContent =
-            "Importing local game package.";
+            "Installing game package.";
     }
+
+    importBrowserState =
+        "installing";
+
+    renderImportBrowser();
 
     try {
 
@@ -1806,7 +2365,8 @@ async function importLocalGame() {
             await invoke(
                 "import_local_game",
                 {
-                    sourceDir,
+                    sourceDir:
+                        String(game.packagePath),
                     overwrite:
                         false
                 }
@@ -1817,7 +2377,15 @@ async function importLocalGame() {
             profile
         );
 
+        installedPackageProfile =
+            profile;
+
+        importBrowserState =
+            "installed";
+
         await loadGameLibrary();
+
+        renderImportBrowser();
 
     }
 
@@ -1828,12 +2396,56 @@ async function importLocalGame() {
             error
         );
 
-        if (libraryStatus) {
-            libraryStatus.textContent =
-                `Import failed: ${error}`;
-        }
+        importBrowserState =
+            "package-error";
+
+        invalidInstallPackages =
+            [
+                {
+                    error:
+                        String(error)
+                }
+            ];
+
+        renderImportBrowser();
 
     }
+
+}
+
+
+function backFromImportBrowser() {
+
+    if (!importBrowserOpen) {
+        return;
+    }
+
+    if (
+        importBrowserState === "installed"
+    ) {
+        closeImportBrowser();
+        loadGameLibrary();
+        return;
+    }
+
+    closeImportBrowser();
+
+}
+
+
+function showImportDeveloperDetails() {
+
+    if (!importDetails) {
+        return;
+    }
+
+    importDetails.hidden =
+        false;
+
+    importDetails.textContent =
+        `Developer details: ${invalidInstallPackages
+            .map((packageInfo) => packageInfo.error)
+            .join(" / ") || "No details available."}`;
 
 }
 
@@ -1846,6 +2458,12 @@ async function launchSelectedGame() {
     if (!game) {
         return;
     }
+
+    showGameLifecycleOverlay(
+        "LAUNCHING",
+        game.name,
+        "Preparing game runtime."
+    );
 
     if (libraryStatus) {
         libraryStatus.textContent =
@@ -1868,11 +2486,31 @@ async function launchSelectedGame() {
             status
         );
 
+        runningGameId =
+            game.id;
+
         if (libraryStatus) {
             libraryStatus.textContent =
                 status.pid
                     ? `${game.name} is running. PID ${status.pid}.`
                     : `${game.name} launch state: ${status.state}.`;
+        }
+
+        if (status.pid) {
+            showGameLifecycleOverlay(
+                "RUNNING",
+                game.name,
+                `PID ${status.pid}`
+            );
+
+            await invoke(
+                "prepare_shell_for_game"
+            );
+
+            startRunningGameMonitor(game);
+        }
+        else {
+            hideGameLifecycleOverlay();
         }
 
     }
@@ -1886,9 +2524,147 @@ async function launchSelectedGame() {
 
         if (libraryStatus) {
             libraryStatus.textContent =
-                `Launch failed: ${error}`;
+                "GAME COULD NOT START";
         }
 
+        showGameLifecycleOverlay(
+            "GAME COULD NOT START",
+            game.name,
+            "The game could not be launched.",
+            String(error)
+        );
+
+    }
+
+}
+
+
+function showGameLifecycleOverlay(title, gameName, status, details = "") {
+
+    gameLifecycleOverlay
+        ?.classList
+        .add("visible");
+
+    if (gameLifecycleTitle) {
+        gameLifecycleTitle.textContent =
+            title;
+    }
+
+    if (gameLifecycleName) {
+        gameLifecycleName.textContent =
+            gameName || "GAME";
+    }
+
+    if (gameLifecycleStatus) {
+        gameLifecycleStatus.textContent =
+            status || "";
+    }
+
+    if (gameLifecycleDetails) {
+        gameLifecycleDetails.hidden =
+            !details;
+        gameLifecycleDetails.textContent =
+            details
+                ? `Developer details: ${details}`
+                : "";
+    }
+
+}
+
+
+function hideGameLifecycleOverlay() {
+
+    gameLifecycleOverlay
+        ?.classList
+        .remove("visible");
+
+}
+
+
+function startRunningGameMonitor(game) {
+
+    if (runningGamePollTimer) {
+        clearInterval(runningGamePollTimer);
+    }
+
+    runningGamePollTimer =
+        setInterval(
+            async () => {
+
+                try {
+
+                    const status =
+                        await invoke(
+                            "running_game_status"
+                        );
+
+                    if (
+                        status.state !== "running" ||
+                        status.gameId !== game.id
+                    ) {
+
+                        clearInterval(runningGamePollTimer);
+                        runningGamePollTimer =
+                            null;
+                        runningGameId =
+                            null;
+
+                        await restoreShellAfterGame(game);
+
+                    }
+
+                }
+
+                catch (error) {
+                    console.error(
+                        "[ONA Runtime] Game monitor failed:",
+                        error
+                    );
+                }
+
+            },
+            800
+        );
+
+}
+
+
+async function restoreShellAfterGame(game) {
+
+    try {
+        await invoke(
+            "restore_shell_after_game"
+        );
+    }
+    catch (error) {
+        console.error(
+            "[ONA Runtime] Shell restore failed:",
+            error
+        );
+    }
+
+    hideGameLifecycleOverlay();
+
+    await loadGameLibrary();
+
+    const gameIndex =
+        installedGames.findIndex(
+            (installedGame) =>
+                installedGame.id === game.id
+        );
+
+    selectedGameIndex =
+        gameIndex >= 0
+            ? gameIndex
+            : 0;
+
+    transitionTo(
+        ONA_STATE.GAME_LIBRARY
+    );
+
+    if (libraryStatus) {
+        libraryStatus.textContent =
+            `${game.name} closed.`;
     }
 
 }
@@ -1920,6 +2696,248 @@ async function showRuntimeStatus() {
             "[ONA Runtime] Status failed:",
             error
         );
+    }
+
+}
+
+
+function openGameOptions() {
+
+    const game =
+        installedGames[selectedGameIndex];
+
+    if (!game) {
+        return;
+    }
+
+    selectedOptionsGame =
+        game;
+
+    gameOptionsOpen =
+        true;
+
+    gameOptionsMode =
+        "menu";
+
+    renderGameOptions();
+
+    gameOptionsOverlay
+        ?.classList
+        .add("visible");
+
+}
+
+
+function closeGameOptions() {
+
+    gameOptionsOpen =
+        false;
+
+    gameOptionsMode =
+        "menu";
+
+    selectedOptionsGame =
+        null;
+
+    gameOptionsOverlay
+        ?.classList
+        .remove("visible");
+
+}
+
+
+function renderGameOptions() {
+
+    const game =
+        selectedOptionsGame;
+
+    if (gameOptionsTitle) {
+        gameOptionsTitle.textContent =
+            game?.name || "GAME";
+    }
+
+    if (gameOptionsDetails) {
+        gameOptionsDetails.hidden =
+            true;
+        gameOptionsDetails.textContent =
+            "";
+    }
+
+    if (!gameOptionsStatus) {
+        return;
+    }
+
+    if (gameOptionsMode === "confirm-uninstall") {
+        gameOptionsStatus.textContent =
+            "The game will be removed from this ONA system.";
+        gameOptionsOverlay
+            ?.classList
+            .add("confirming");
+        return;
+    }
+
+    if (gameOptionsMode === "uninstalling") {
+        gameOptionsStatus.textContent =
+            "UNINSTALLING...";
+        return;
+    }
+
+    if (gameOptionsMode === "uninstalled") {
+        gameOptionsStatus.textContent =
+            "UNINSTALLED";
+        return;
+    }
+
+    if (gameOptionsMode === "error") {
+        gameOptionsStatus.textContent =
+            "GAME IS CURRENTLY RUNNING";
+        return;
+    }
+
+    gameOptionsOverlay
+        ?.classList
+        .remove("confirming");
+
+    gameOptionsStatus.textContent =
+        "SELECT AN ACTION";
+
+}
+
+
+async function activateGameOptions() {
+
+    if (
+        !gameOptionsOpen ||
+        !selectedOptionsGame
+    ) {
+        return;
+    }
+
+    if (gameOptionsMode === "menu") {
+        gameOptionsMode =
+            "confirm-uninstall";
+        renderGameOptions();
+        return;
+    }
+
+    if (gameOptionsMode === "confirm-uninstall") {
+        await uninstallSelectedOptionsGame();
+        return;
+    }
+
+    if (gameOptionsMode === "error") {
+        showGameOptionsDetails();
+        return;
+    }
+
+}
+
+
+function backFromGameOptions() {
+
+    if (!gameOptionsOpen) {
+        return;
+    }
+
+    if (
+        gameOptionsMode === "confirm-uninstall" ||
+        gameOptionsMode === "error"
+    ) {
+        gameOptionsMode =
+            "menu";
+        renderGameOptions();
+        return;
+    }
+
+    closeGameOptions();
+
+}
+
+
+async function uninstallSelectedOptionsGame() {
+
+    const game =
+        selectedOptionsGame;
+
+    if (!game) {
+        return;
+    }
+
+    gameOptionsMode =
+        "uninstalling";
+
+    renderGameOptions();
+
+    try {
+
+        await invoke(
+            "uninstall_installed_game",
+            {
+                gameId:
+                    game.id
+            }
+        );
+
+        gameOptionsMode =
+            "uninstalled";
+
+        renderGameOptions();
+
+        if (libraryStatus) {
+            libraryStatus.textContent =
+                `${game.name} uninstalled.`;
+        }
+
+        await loadGameLibrary();
+
+        setTimeout(
+            () => {
+                closeGameOptions();
+                renderGameLibrary();
+            },
+            700
+        );
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "[ONA Library] Uninstall failed:",
+            error
+        );
+
+        gameOptionsMode =
+            "error";
+
+        renderGameOptions();
+
+        if (gameOptionsDetails) {
+            gameOptionsDetails.hidden =
+                false;
+            gameOptionsDetails.textContent =
+                String(error) === "GAME_IS_CURRENTLY_RUNNING"
+                    ? "Close the game before uninstalling."
+                    : `Developer details: ${error}`;
+        }
+
+    }
+
+}
+
+
+function showGameOptionsDetails() {
+
+    if (!gameOptionsDetails) {
+        return;
+    }
+
+    gameOptionsDetails.hidden =
+        false;
+
+    if (!gameOptionsDetails.textContent) {
+        gameOptionsDetails.textContent =
+            "Developer details: no additional details.";
     }
 
 }
@@ -2976,6 +3994,74 @@ window.addEventListener(
     "keydown",
     (event) => {
 
+        if (importBrowserOpen) {
+
+            switch (event.key) {
+
+                case "ArrowLeft":
+
+                case "ArrowUp":
+
+                    event.preventDefault();
+                    navigateInstallPackages(-1);
+                    break;
+
+                case "ArrowRight":
+
+                case "ArrowDown":
+
+                    event.preventDefault();
+                    navigateInstallPackages(1);
+                    break;
+
+                case "Enter":
+
+                case " ":
+
+                    event.preventDefault();
+                    activateImportBrowser();
+                    break;
+
+                case "Backspace":
+
+                case "Escape":
+
+                    event.preventDefault();
+                    backFromImportBrowser();
+                    break;
+
+            }
+
+            return;
+
+        }
+
+        if (gameOptionsOpen) {
+
+            switch (event.key) {
+
+                case "Enter":
+
+                case " ":
+
+                    event.preventDefault();
+                    activateGameOptions();
+                    break;
+
+                case "Backspace":
+
+                case "Escape":
+
+                    event.preventDefault();
+                    backFromGameOptions();
+                    break;
+
+            }
+
+            return;
+
+        }
+
         if (
             currentState ===
             ONA_STATE.PROFILE_SELECT
@@ -3073,6 +4159,21 @@ window.addEventListener(
                     }
                     else {
                         importGameButton?.click();
+                    }
+
+                    break;
+
+                case "x":
+
+                case "X":
+
+                    event.preventDefault();
+
+                    if (
+                        installedGames.length &&
+                        selectedGameIndex < installedGames.length
+                    ) {
+                        openGameOptions();
                     }
 
                     break;
@@ -4057,6 +5158,46 @@ tauri.event.listen(
 
         }
 
+        if (importBrowserOpen) {
+
+            if (
+                button === "A"
+            ) {
+                activateImportBrowser();
+                return;
+            }
+
+            if (
+                button === "B"
+            ) {
+                backFromImportBrowser();
+                return;
+            }
+
+            return;
+
+        }
+
+        if (gameOptionsOpen) {
+
+            if (
+                button === "A"
+            ) {
+                activateGameOptions();
+                return;
+            }
+
+            if (
+                button === "B"
+            ) {
+                backFromGameOptions();
+                return;
+            }
+
+            return;
+
+        }
+
         if (
             currentState === ONA_STATE.WAITING_CONTROLLER &&
             addingController &&
@@ -4536,6 +5677,21 @@ tauri.event.listen(
                 transitionTo(
                     ONA_STATE.MAIN_MENU
                 );
+
+                return;
+
+            }
+
+            if (
+                button === "X"
+            ) {
+
+                if (
+                    installedGames.length &&
+                    selectedGameIndex < installedGames.length
+                ) {
+                    openGameOptions();
+                }
 
                 return;
 

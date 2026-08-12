@@ -40,6 +40,7 @@ mod game_manager {
     pub mod library;
     pub mod manifest;
     pub mod profile;
+    pub mod scanner;
     pub mod storage;
 }
 

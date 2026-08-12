@@ -195,10 +195,10 @@ impl GameLauncher {
 
 fn apply_ona_runtime_environment(command: &mut Command, runtime: &OnaGameRuntimeContext) {
     command
-        .env("ONA_RUNTIME", "1")
-        .env("ONA_PROTOCOL_VERSION", ONA_RUNTIME_PROTOCOL_VERSION)
         .env("ONA_INPUT_HOST", &runtime.input_host)
-        .env("ONA_INPUT_PORT", runtime.input_port.to_string());
+        .env("ONA_INPUT_PORT", runtime.input_port.to_string())
+        .env("ONA_RUNTIME", "1")
+        .env("ONA_PROTOCOL_VERSION", ONA_RUNTIME_PROTOCOL_VERSION);
 
     if let Some(player_id) = runtime.player_id {
         command.env("ONA_PLAYER_ID", player_id.to_string());

@@ -16,12 +16,17 @@ mod tests {
         io::{BufRead, BufReader},
         net::TcpStream,
         path::{Path, PathBuf},
+        process::Command,
         thread,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     use crate::{
-        game_manager::{importer::import_game_from_dir, library::GameLibrary},
+        game_manager::{
+            importer::import_game_from_dir,
+            library::GameLibrary,
+            scanner::{scan_game_packages, InstallationSource, InstallationSourceKind},
+        },
         input::{
             bridge::GameInputBridge,
             dispatcher::dispatch,
@@ -189,16 +194,17 @@ mod tests {
 
         assert_eq!(status.state, GameLifecycleState::Running);
 
-        for _ in 0..20 {
-            if env_output.is_file() {
+        let mut captured = String::new();
+
+        for _ in 0..40 {
+            captured = fs::read_to_string(&env_output).unwrap_or_default();
+
+            if captured.contains("ONA_RUNTIME=1") {
                 break;
             }
 
             thread::sleep(Duration::from_millis(50));
         }
-
-        let captured =
-            fs::read_to_string(&env_output).expect("child process should capture runtime env");
 
         assert!(captured.contains("ONA_RUNTIME=1"));
         assert!(captured.contains("ONA_PROTOCOL_VERSION=1"));
@@ -206,6 +212,106 @@ mod tests {
         assert!(captured.contains(&format!("ONA_INPUT_PORT={}", bridge_status.port)));
 
         let _ = launcher.terminate();
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn scanner_reports_valid_invalid_multiple_and_already_installed_packages() {
+        let root = unique_temp_dir();
+        let app_data = root.join("ona-data");
+        let source_root = root.join("external-source");
+        let ona_library = source_root.join("ONA Library");
+        let valid_one = ona_library.join("GAME-ONE");
+        let valid_two = ona_library.join("GAME-TWO");
+        let invalid = ona_library.join("BROKEN-GAME");
+
+        fs::create_dir_all(&valid_one).expect("valid package should be created");
+        fs::create_dir_all(&valid_two).expect("valid package should be created");
+        fs::create_dir_all(&invalid).expect("invalid package should be created");
+
+        let valid_one_executable = create_test_executable(&valid_one);
+        let valid_two_executable = create_test_executable(&valid_two);
+
+        write_test_manifest(
+            &valid_one,
+            "studio.test.one",
+            "Scanner Game One",
+            &valid_one_executable,
+        );
+        write_test_manifest(
+            &valid_two,
+            "studio.test.two",
+            "Scanner Game Two",
+            &valid_two_executable,
+        );
+        fs::write(invalid.join("game.json"), r#"{"identity":{"id":"broken"}}"#)
+            .expect("invalid manifest should be written");
+
+        let library = GameLibrary::new(&app_data);
+        import_game_from_dir(&library, &valid_one, false)
+            .expect("first package should install for duplicate detection");
+
+        let report = scan_game_packages(
+            &library,
+            vec![InstallationSource {
+                id: "TEST".to_string(),
+                name: "USB DRIVE TEST".to_string(),
+                root: source_root,
+                library_path: ona_library,
+                kind: InstallationSourceKind::ExternalStorage,
+            }],
+        );
+
+        assert_eq!(report.sources.len(), 1);
+        assert_eq!(report.games.len(), 2);
+        assert_eq!(report.invalid_packages.len(), 1);
+        assert!(report
+            .games
+            .iter()
+            .any(|game| game.game_id == "studio.test.one" && game.already_installed));
+        assert!(report
+            .games
+            .iter()
+            .any(|game| game.game_id == "studio.test.two" && !game.already_installed));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn uninstall_removes_only_managed_local_copy_and_keeps_external_package() {
+        let root = unique_temp_dir();
+        let source = root.join("external-package");
+        let app_data = root.join("ona-data");
+        fs::create_dir_all(&source).expect("source package directory should be created");
+
+        let executable = create_test_executable(&source);
+        write_test_manifest(
+            &source,
+            "studio.test.uninstall",
+            "Uninstall Test Game",
+            &executable,
+        );
+
+        let library = GameLibrary::new(&app_data);
+        let imported = import_game_from_dir(&library, &source, false)
+            .expect("generic game package should import");
+
+        assert!(imported.install_dir.is_dir());
+        assert!(source.join("game.json").is_file());
+
+        library
+            .uninstall_game("studio.test.uninstall")
+            .expect("managed game should uninstall");
+
+        assert!(!imported.install_dir.exists());
+        assert!(source.join("game.json").is_file());
+        assert!(source.join(&executable).is_file());
+        assert!(library
+            .list_games()
+            .expect("library should list after uninstall")
+            .games
+            .is_empty());
+
         let _ = fs::remove_dir_all(root);
     }
 
@@ -223,21 +329,38 @@ mod tests {
 
     #[cfg(windows)]
     fn create_env_capture_executable(source: &Path, output: &Path) -> String {
-        let name = "capture-env.cmd";
-        let path = source.join(name);
-        let output = output.to_string_lossy();
+        let source_file = source.join("capture-env.rs");
+        let executable = source.join("capture-env.exe");
+        let output = output.to_string_lossy().replace('\\', "\\\\");
 
         fs::write(
-            &path,
+            &source_file,
             format!(
-                "@echo off\r\n\
-                set ONA_> \"{output}\"\r\n\
-                exit /b 0\r\n"
+                "fn main() {{
+                    let output = r#\"{output}\"#;
+                    let content = format!(
+                        \"ONA_RUNTIME={{}}\\nONA_PROTOCOL_VERSION={{}}\\nONA_INPUT_HOST={{}}\\nONA_INPUT_PORT={{}}\\n\",
+                        std::env::var(\"ONA_RUNTIME\").unwrap_or_default(),
+                        std::env::var(\"ONA_PROTOCOL_VERSION\").unwrap_or_default(),
+                        std::env::var(\"ONA_INPUT_HOST\").unwrap_or_default(),
+                        std::env::var(\"ONA_INPUT_PORT\").unwrap_or_default()
+                    );
+                    std::fs::write(output, content).unwrap();
+                }}"
             ),
         )
-        .expect("test executable should be written");
+        .expect("test source should be written");
 
-        name.to_string()
+        let status = Command::new("rustc")
+            .arg(&source_file)
+            .arg("-o")
+            .arg(&executable)
+            .status()
+            .expect("rustc should run");
+
+        assert!(status.success(), "test executable should compile");
+
+        "capture-env.exe".to_string()
     }
 
     #[cfg(not(windows))]
@@ -291,5 +414,41 @@ mod tests {
             .as_nanos();
 
         std::env::temp_dir().join(format!("ona-core-infra-test-{timestamp}"))
+    }
+
+    fn write_test_manifest(package_dir: &Path, id: &str, name: &str, executable: &str) {
+        let manifest = format!(
+            r#"{{
+                "manifestVersion": 1,
+                "identity": {{
+                    "id": "{id}",
+                    "name": "{name}",
+                    "version": "0.1.0",
+                    "developer": "ONA Test Lab"
+                }},
+                "presentation": {{
+                    "description": "Scanner verification package."
+                }},
+                "execution": {{
+                    "executable": "{executable}",
+                    "workingDirectory": ".",
+                    "arguments": []
+                }},
+                "requirements": {{
+                    "platform": "{}",
+                    "architecture": "{}"
+                }},
+                "display": {{
+                    "fullscreen": false
+                }},
+                "input": {{
+                    "profile": "ona-standard-controller-v1"
+                }}
+            }}"#,
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        );
+
+        fs::write(package_dir.join("game.json"), manifest).expect("manifest should be written");
     }
 }

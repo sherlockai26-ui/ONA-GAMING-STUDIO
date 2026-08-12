@@ -4,8 +4,11 @@
 mod display_manager;
 
 use ona_core::game_manager::{
-    catalog::GameCatalog, importer::import_game_from_dir, library::GameLibrary,
+    catalog::GameCatalog,
+    importer::import_game_from_dir,
+    library::GameLibrary,
     profile::GameProfile,
+    scanner::{scan_external_game_packages, PackageScanReport},
 };
 use ona_core::input::{
     bridge::{GameInputBridge, GameInputBridgeStatus},
@@ -18,6 +21,7 @@ use ona_core::launcher::{
     state::RunningGameStatus,
 };
 use ona_core::qr::generator::{generate, generate_svg};
+use ona_core::runtime::lifecycle::GameLifecycleState;
 use ona_core::session::manager::create_session;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::Mutex};
@@ -217,6 +221,15 @@ fn import_local_game(
 }
 
 #[tauri::command]
+fn scan_game_installation_sources(
+    app_handle: tauri::AppHandle,
+) -> Result<PackageScanReport, String> {
+    let library = game_library(&app_handle)?;
+
+    Ok(scan_external_game_packages(&library))
+}
+
+#[tauri::command]
 fn launch_installed_game(
     app_handle: tauri::AppHandle,
     runtime: tauri::State<'_, OnaGameRuntime>,
@@ -244,10 +257,51 @@ fn launch_installed_game(
 }
 
 #[tauri::command]
+fn prepare_shell_for_game(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let window = app_handle
+        .get_webview_window("main")
+        .ok_or_else(|| "Main ONA window was not found.".to_string())?;
+
+    window.hide().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn restore_shell_after_game(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let window = app_handle
+        .get_webview_window("main")
+        .ok_or_else(|| "Main ONA window was not found.".to_string())?;
+
+    let _ = window.unminimize();
+    window.show().map_err(|error| error.to_string())?;
+    window
+        .set_fullscreen(true)
+        .map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn running_game_status(
     runtime: tauri::State<'_, OnaGameRuntime>,
 ) -> Result<RunningGameStatus, String> {
     Ok(runtime.launcher.status())
+}
+
+#[tauri::command]
+fn uninstall_installed_game(
+    app_handle: tauri::AppHandle,
+    runtime: tauri::State<'_, OnaGameRuntime>,
+    game_id: String,
+) -> Result<(), String> {
+    let status = runtime.launcher.status();
+
+    if status.state == GameLifecycleState::Running && status.game_id.as_deref() == Some(&game_id) {
+        return Err("GAME_IS_CURRENTLY_RUNNING".to_string());
+    }
+
+    let library = game_library(&app_handle)?;
+    library
+        .uninstall_game(&game_id)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -343,9 +397,13 @@ pub fn run() {
             greet,
             generate_qr_session,
             list_installed_games,
+            scan_game_installation_sources,
             import_local_game,
             launch_installed_game,
+            prepare_shell_for_game,
+            restore_shell_after_game,
             running_game_status,
+            uninstall_installed_game,
             terminate_running_game,
             game_input_bridge_status,
             minimize_main_window,
