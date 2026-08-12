@@ -16,7 +16,7 @@ use ona_core::input::{
 use ona_core::launcher::{process::GameLauncher, state::RunningGameStatus};
 use ona_core::qr::generator::{generate, generate_svg};
 use ona_core::session::manager::create_session;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::Mutex};
 use tauri::{Emitter, Manager};
 
@@ -29,6 +29,47 @@ struct OnaGameRuntime {
 struct QrSession {
     url: String,
     svg: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OnaShellSettings {
+    language: String,
+    ui_animations: bool,
+    reduced_motion: bool,
+    visual_intensity: String,
+    ui_muted: bool,
+    ui_volume: u8,
+}
+
+impl Default for OnaShellSettings {
+    fn default() -> Self {
+        Self {
+            language: "English".to_string(),
+            ui_animations: true,
+            reduced_motion: false,
+            visual_intensity: "normal".to_string(),
+            ui_muted: false,
+            ui_volume: 70,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OnaSystemInfo {
+    version: String,
+    platform: String,
+    architecture: String,
+    app_data_path: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OnaStorageInfo {
+    app_data_path: String,
+    installed_games: usize,
+    app_data_bytes: u64,
 }
 
 #[tauri::command]
@@ -54,6 +95,103 @@ fn game_library(app_handle: &tauri::AppHandle) -> Result<GameLibrary, String> {
         .map_err(|error| error.to_string())?;
 
     Ok(GameLibrary::new(app_data_dir))
+}
+
+fn settings_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+
+    Ok(app_data_dir.join("settings.json"))
+}
+
+fn directory_size(path: &std::path::Path) -> u64 {
+    let Ok(entries) = fs::read_dir(path) else {
+        return 0;
+    };
+
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| {
+            let Ok(metadata) = entry.metadata() else {
+                return 0;
+            };
+
+            if metadata.is_dir() {
+                directory_size(&entry.path())
+            } else {
+                metadata.len()
+            }
+        })
+        .sum()
+}
+
+#[tauri::command]
+fn load_shell_settings(app_handle: tauri::AppHandle) -> Result<OnaShellSettings, String> {
+    let settings_path = settings_path(&app_handle)?;
+
+    if !settings_path.is_file() {
+        return Ok(OnaShellSettings::default());
+    }
+
+    let settings = fs::read_to_string(settings_path).map_err(|error| error.to_string())?;
+    serde_json::from_str::<OnaShellSettings>(&settings).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_shell_settings(
+    app_handle: tauri::AppHandle,
+    settings: OnaShellSettings,
+) -> Result<OnaShellSettings, String> {
+    let settings_path = settings_path(&app_handle)?;
+
+    if let Some(parent) = settings_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    let settings_json =
+        serde_json::to_string_pretty(&settings).map_err(|error| error.to_string())?;
+    fs::write(settings_path, settings_json).map_err(|error| error.to_string())?;
+
+    Ok(settings)
+}
+
+#[tauri::command]
+fn display_layout(app_handle: tauri::AppHandle) -> Result<display_manager::DisplayLayout, String> {
+    display_manager::detect_layout(&app_handle).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn system_information(app_handle: tauri::AppHandle) -> Result<OnaSystemInfo, String> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+
+    Ok(OnaSystemInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        platform: std::env::consts::OS.to_string(),
+        architecture: std::env::consts::ARCH.to_string(),
+        app_data_path: app_data_dir.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+fn storage_information(app_handle: tauri::AppHandle) -> Result<OnaStorageInfo, String> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    let games = game_library(&app_handle)?
+        .list_games()
+        .map_err(|error| error.to_string())?;
+
+    Ok(OnaStorageInfo {
+        app_data_path: app_data_dir.to_string_lossy().to_string(),
+        installed_games: games.games.len(),
+        app_data_bytes: directory_size(&app_data_dir),
+    })
 }
 
 #[tauri::command]
@@ -195,6 +333,11 @@ pub fn run() {
             terminate_running_game,
             game_input_bridge_status,
             minimize_main_window,
+            load_shell_settings,
+            save_shell_settings,
+            display_layout,
+            system_information,
+            storage_information,
             load_controller_profile,
             save_controller_profile
         ])

@@ -41,6 +41,12 @@ const controllersScreen =
 const gameLibraryScreen =
     document.getElementById("game-library-screen");
 
+const storeScreen =
+    document.getElementById("store-screen");
+
+const settingsScreen =
+    document.getElementById("settings-screen");
+
 const controllerLabScreen =
     document.getElementById("controller-lab-screen");
 
@@ -95,6 +101,24 @@ const homeContinueAction =
 const homeRecentRow =
     document.getElementById("home-recent-row");
 
+const libraryPlayerAvatar =
+    document.getElementById("library-player-avatar");
+
+const libraryPlayerName =
+    document.getElementById("library-player-name");
+
+const storePlayerAvatar =
+    document.getElementById("store-player-avatar");
+
+const storePlayerName =
+    document.getElementById("store-player-name");
+
+const settingsCategories =
+    document.getElementById("settings-categories");
+
+const settingsPanel =
+    document.getElementById("settings-panel");
+
 const resumeButton =
     document.getElementById("resume-button");
 
@@ -125,6 +149,9 @@ const gameGrid =
 const controllersStatus =
     document.getElementById("controllers-status");
 
+const controllersPlayerName =
+    document.getElementById("controllers-player-name");
+
 const calibrateControllerButton =
     document.getElementById("calibrate-controller-button");
 
@@ -148,6 +175,12 @@ const labStickX =
 
 const labStickY =
     document.getElementById("lab-stick-y");
+
+const labRawStickX =
+    document.getElementById("lab-raw-stick-x");
+
+const labRawStickY =
+    document.getElementById("lab-raw-stick-y");
 
 const labButtons =
     document.getElementById("lab-buttons");
@@ -206,6 +239,12 @@ const ONA_STATE = {
 
     GAME_LIBRARY:
         "game-library",
+
+    STORE:
+        "store",
+
+    SETTINGS:
+        "settings",
 
     CONTROLLERS:
         "controllers",
@@ -315,6 +354,33 @@ let lastRawStick = {
         0
 };
 
+let shellSettings = {
+    language:
+        "English",
+    uiAnimations:
+        true,
+    reducedMotion:
+        false,
+    visualIntensity:
+        "normal",
+    uiMuted:
+        false,
+    uiVolume:
+        70
+};
+
+let settingsFocusLevel =
+    "category";
+
+let settingsData = {
+    display:
+        null,
+    storage:
+        null,
+    system:
+        null
+};
+
 
 // =========================================================
 // SCREEN MANAGEMENT
@@ -339,6 +405,14 @@ function hideAllScreens() {
         .remove("active");
 
     gameLibraryScreen
+        ?.classList
+        .remove("active");
+
+    storeScreen
+        ?.classList
+        .remove("active");
+
+    settingsScreen
         ?.classList
         .remove("active");
 
@@ -468,7 +542,7 @@ async function loadHomeCatalog() {
                 : [];
 
         if (
-            selectedGameIndex >= installedGames.length
+            selectedGameIndex > installedGames.length
         ) {
             selectedGameIndex = 0;
         }
@@ -632,9 +706,454 @@ function showGameLibrary() {
         ?.classList
         .add("active");
 
+    updateLibraryPlayer();
     loadGameLibrary();
 
 }
+
+
+function updateLibraryPlayer() {
+
+    if (libraryPlayerAvatar) {
+        libraryPlayerAvatar.textContent =
+            `P${currentProfile.player}`;
+    }
+
+    if (libraryPlayerName) {
+        libraryPlayerName.textContent =
+            currentProfile.name;
+    }
+
+}
+
+
+// =========================================================
+// SHOW STORE
+// =========================================================
+
+function showStore() {
+
+    hideAllScreens();
+
+    storeScreen
+        ?.classList
+        .add("active");
+
+    updateStorePlayer();
+
+    const selected =
+        storeScreen
+            ?.querySelector(".store-item.selected");
+
+    if (!selected) {
+        storeScreen
+            ?.querySelector(".store-item")
+            ?.classList
+            .add("selected");
+    }
+
+}
+
+
+function updateStorePlayer() {
+
+    if (storePlayerAvatar) {
+        storePlayerAvatar.textContent =
+            `P${currentProfile.player}`;
+    }
+
+    if (storePlayerName) {
+        storePlayerName.textContent =
+            currentProfile.name;
+    }
+
+}
+
+
+// =========================================================
+// SHOW SETTINGS
+// =========================================================
+
+async function showSettings() {
+
+    hideAllScreens();
+
+    settingsScreen
+        ?.classList
+        .add("active");
+
+    settingsFocusLevel =
+        "category";
+
+    await loadSettingsData();
+    renderSettingsPanel();
+    ensureSettingsFocus();
+
+}
+
+
+async function loadSettingsData() {
+
+    try {
+        shellSettings =
+            await invoke("load_shell_settings");
+    }
+    catch (error) {
+        console.error("[ONA Settings] Load failed:", error);
+    }
+
+    await Promise.all([
+        invoke("display_layout")
+            .then((layout) => {
+                settingsData.display = layout;
+            })
+            .catch((error) =>
+                console.error("[ONA Settings] Display info failed:", error)
+            ),
+        invoke("storage_information")
+            .then((storage) => {
+                settingsData.storage = storage;
+            })
+            .catch((error) =>
+                console.error("[ONA Settings] Storage info failed:", error)
+            ),
+        invoke("system_information")
+            .then((system) => {
+                settingsData.system = system;
+            })
+            .catch((error) =>
+                console.error("[ONA Settings] System info failed:", error)
+            )
+    ]);
+
+    applyShellSettings();
+
+}
+
+
+async function persistShellSettings() {
+
+    applyShellSettings();
+
+    try {
+        shellSettings =
+            await invoke(
+                "save_shell_settings",
+                {
+                    settings:
+                        shellSettings
+                }
+            );
+    }
+    catch (error) {
+        console.error("[ONA Settings] Save failed:", error);
+    }
+
+    renderSettingsPanel();
+    ensureSettingsFocus();
+
+}
+
+
+function applyShellSettings() {
+
+    document.body.classList.toggle(
+        "ona-reduced-motion",
+        Boolean(shellSettings.reducedMotion) ||
+        !shellSettings.uiAnimations
+    );
+
+    document.body.dataset.visualIntensity =
+        shellSettings.visualIntensity || "normal";
+
+}
+
+
+function selectedSettingsCategory() {
+
+    return settingsCategories
+        ?.querySelector(".settings-category.selected")
+        ?.dataset
+        ?.settingsCategory || "general";
+
+}
+
+
+function formatBytes(bytes) {
+
+    const value =
+        Number(bytes || 0);
+
+    if (value < 1024 * 1024) {
+        return `${Math.round(value / 1024)} KB`;
+    }
+
+    if (value < 1024 * 1024 * 1024) {
+        return `${(value / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+
+}
+
+
+function settingRow(label, value, action = "", disabled = false) {
+
+    return `<button class="settings-option${disabled ? " disabled" : ""}" data-settings-action="${action}" ${disabled ? "disabled" : ""}>
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+    </button>`;
+
+}
+
+
+function renderSettingsPanel() {
+
+    if (!settingsPanel) {
+        return;
+    }
+
+    const category =
+        selectedSettingsCategory();
+
+    const displays =
+        settingsData.display?.displays || [];
+    const targetDisplay =
+        displays.find(
+            (display) =>
+                display.index === settingsData.display?.targetIndex
+        ) || displays[0];
+
+    const panels = {
+        general:
+            settingRow("LANGUAGE", shellSettings.language || "English", "", true),
+        display:
+            settingRow("GAMING DISPLAY", targetDisplay ? `${targetDisplay.name || targetDisplay.identifier}` : "UNKNOWN", "", true) +
+            settingRow("RESOLUTION", targetDisplay ? `${targetDisplay.width} x ${targetDisplay.height}` : "UNKNOWN", "", true) +
+            settingRow("ROLE", targetDisplay?.isPrimary ? "PRIMARY" : "SECONDARY", "", true) +
+            settingRow("DETECTED MONITORS", String(displays.length), "", true) +
+            settingRow("FULLSCREEN", "ON", "", true),
+        audio:
+            settingRow("ONA UI VOLUME", `${shellSettings.uiVolume}%`, "ui-volume") +
+            settingRow("MUTE UI", shellSettings.uiMuted ? "ON" : "OFF", "ui-muted"),
+        personalization:
+            settingRow("UI ANIMATIONS", shellSettings.uiAnimations ? "ON" : "OFF", "ui-animations") +
+            settingRow("REDUCED MOTION", shellSettings.reducedMotion ? "ON" : "OFF", "reduced-motion") +
+            settingRow("VISUAL INTENSITY", (shellSettings.visualIntensity || "normal").toUpperCase(), "visual-intensity"),
+        network:
+            settingRow("CORE", "ONLINE", "", true) +
+            settingRow("CONTROLLER", playerCountValue > 0 ? "CONNECTED" : "WAITING", "", true) +
+            settingRow("PLAYERS / CONTROLLERS", `${playerCountValue} / 10`, "", true),
+        storage:
+            settingRow("ONA GAMES", `${settingsData.storage?.installedGames ?? installedGames.length} INSTALLED`, "", true) +
+            settingRow("APP DATA", settingsData.storage?.appDataPath || "UNKNOWN", "", true) +
+            settingRow("USED BY ONA DATA", formatBytes(settingsData.storage?.appDataBytes), "", true),
+        system:
+            settingRow("ONA VERSION", settingsData.system?.version || "0.1.0", "", true) +
+            settingRow("PLATFORM", settingsData.system?.platform || navigator.platform, "", true) +
+            settingRow("ARCHITECTURE", settingsData.system?.architecture || "UNKNOWN", "", true) +
+            settingRow("APP DATA PATH", settingsData.system?.appDataPath || "UNKNOWN", "", true),
+        power:
+            settingRow("MINIMIZE ONA", "APPLY", "power-minimize") +
+            settingRow("RESTART ONA", "APPLY", "power-restart") +
+            settingRow("EXIT ONA", "APPLY", "power-exit")
+    };
+
+    settingsPanel.innerHTML =
+        `<div class="settings-panel-title">${escapeHtml(category.toUpperCase())}</div>
+        <div class="settings-options">${panels[category] || ""}</div>`;
+
+}
+
+
+function ensureSettingsFocus() {
+
+    const category =
+        settingsCategories?.querySelector(".settings-category.selected");
+
+    if (!category) {
+        settingsCategories
+            ?.querySelector(".settings-category")
+            ?.classList
+            .add("selected");
+    }
+
+    if (settingsFocusLevel === "option") {
+        const selectedOption =
+            settingsPanel?.querySelector(".settings-option.selected:not(.disabled)");
+
+        if (!selectedOption) {
+            settingsPanel
+                ?.querySelector(".settings-option:not(.disabled)")
+                ?.classList
+                .add("selected");
+        }
+    }
+
+}
+
+
+function moveSettingsSelection(direction) {
+
+    const step =
+        direction === "left" ||
+        direction === "up"
+            ? -1
+            : 1;
+
+    if (
+        settingsFocusLevel === "category" ||
+        direction === "left"
+    ) {
+        settingsFocusLevel =
+            "category";
+        settingsPanel
+            ?.querySelectorAll(".settings-option")
+            .forEach((option) => option.classList.remove("selected"));
+        moveSelectedElement(
+            settingsCategories,
+            ".settings-category",
+            step
+        );
+        renderSettingsPanel();
+        return;
+    }
+
+    if (direction === "right") {
+        settingsFocusLevel =
+            "option";
+        ensureSettingsFocus();
+        return;
+    }
+
+    moveSelectedElement(
+        settingsPanel,
+        ".settings-option:not(.disabled)",
+        step
+    );
+
+}
+
+
+function activateSettingsSelection() {
+
+    if (settingsFocusLevel === "category") {
+        settingsFocusLevel =
+            "option";
+        ensureSettingsFocus();
+        return;
+    }
+
+    const action =
+        settingsPanel
+            ?.querySelector(".settings-option.selected")
+            ?.dataset
+            ?.settingsAction;
+
+    if (!action) {
+        return;
+    }
+
+    if (action === "ui-animations") {
+        shellSettings.uiAnimations =
+            !shellSettings.uiAnimations;
+        persistShellSettings();
+        return;
+    }
+
+    if (action === "reduced-motion") {
+        shellSettings.reducedMotion =
+            !shellSettings.reducedMotion;
+        persistShellSettings();
+        return;
+    }
+
+    if (action === "visual-intensity") {
+        shellSettings.visualIntensity =
+            shellSettings.visualIntensity === "normal"
+                ? "low"
+                : "normal";
+        persistShellSettings();
+        return;
+    }
+
+    if (action === "ui-muted") {
+        shellSettings.uiMuted =
+            !shellSettings.uiMuted;
+        persistShellSettings();
+        return;
+    }
+
+    if (action === "ui-volume") {
+        shellSettings.uiVolume =
+            shellSettings.uiVolume >= 100
+                ? 0
+                : shellSettings.uiVolume + 10;
+        persistShellSettings();
+        return;
+    }
+
+    if (action === "power-minimize") {
+        minimizeButton?.click();
+        return;
+    }
+
+    if (action === "power-restart") {
+        restartButton?.click();
+        return;
+    }
+
+    if (action === "power-exit") {
+        exitButton?.click();
+    }
+
+}
+
+
+settingsCategories?.addEventListener(
+    "click",
+    (event) => {
+        const category =
+            event.target.closest(".settings-category");
+
+        if (!category) {
+            return;
+        }
+
+        settingsFocusLevel =
+            "category";
+
+        settingsCategories
+            ?.querySelectorAll(".settings-category")
+            .forEach((item) => item.classList.remove("selected"));
+
+        category.classList.add("selected");
+        renderSettingsPanel();
+    }
+);
+
+
+settingsPanel?.addEventListener(
+    "click",
+    (event) => {
+        const option =
+            event.target.closest(".settings-option:not(.disabled)");
+
+        if (!option) {
+            return;
+        }
+
+        settingsFocusLevel =
+            "option";
+
+        settingsPanel
+            ?.querySelectorAll(".settings-option")
+            .forEach((item) => item.classList.remove("selected"));
+
+        option.classList.add("selected");
+        activateSettingsSelection();
+    }
+);
 
 
 // =========================================================
@@ -650,6 +1169,7 @@ function showControllers() {
         .add("active");
 
     updateControllersScreen();
+    ensureControllersFocus();
 
 }
 
@@ -770,6 +1290,18 @@ function setState(state) {
 
             break;
 
+        case ONA_STATE.STORE:
+
+            showStore();
+
+            break;
+
+        case ONA_STATE.SETTINGS:
+
+            showSettings();
+
+            break;
+
         case ONA_STATE.CONTROLLERS:
 
             showControllers();
@@ -852,7 +1384,25 @@ function renderGameLibrary() {
 
         if (libraryStatus) {
             libraryStatus.textContent =
-                "No installed games. Import a local game package to add it to ONA.";
+                "";
+        }
+
+        gameGrid.appendChild(
+            createAddGameCard(true)
+        );
+
+        for (
+            let index = 0;
+            index < 3;
+            index++
+        ) {
+            const slot =
+                document.createElement("div");
+
+            slot.className =
+                "game-card game-card-slot";
+
+            gameGrid.appendChild(slot);
         }
 
         return;
@@ -861,7 +1411,7 @@ function renderGameLibrary() {
 
     if (libraryStatus) {
         libraryStatus.textContent =
-            `${installedGames.length} installed game${installedGames.length === 1 ? "" : "s"}.`;
+            "";
     }
 
     installedGames.forEach(
@@ -914,25 +1464,80 @@ function renderGameLibrary() {
         }
     );
 
+    gameGrid.appendChild(
+        createAddGameCard(
+            selectedGameIndex === installedGames.length
+        )
+    );
+
+}
+
+
+function createAddGameCard(selected) {
+
+    const card =
+        document.createElement("button");
+
+    card.className =
+        "game-card game-card-add";
+
+    card.dataset.gameAction =
+        "import";
+
+    card.classList.toggle(
+        "selected",
+        selected
+    );
+
+    const title =
+        installedGames.length
+            ? "ADD GAME"
+            : "ADD YOUR FIRST GAME";
+
+    card.innerHTML =
+        `<div class="game-add-icon">+</div>
+        <div class="game-card-body">
+            <div class="game-title">${title}</div>
+            <div class="game-description">Import a compatible game package to your library.</div>
+            <div class="game-import-label">IMPORT GAME</div>
+        </div>`;
+
+    card.addEventListener(
+        "click",
+        () => {
+            importGameButton?.click();
+        }
+    );
+
+    return card;
+
 }
 
 
 function navigateGames(direction) {
 
     if (
-        currentState !== ONA_STATE.GAME_LIBRARY ||
-        !installedGames.length
+        currentState !== ONA_STATE.GAME_LIBRARY
     ) {
         return;
     }
 
+    if (!installedGames.length) {
+        selectedGameIndex = 0;
+        renderGameLibrary();
+        return;
+    }
+
+    const libraryItemCount =
+        installedGames.length + 1;
+
     selectedGameIndex += direction;
 
     if (selectedGameIndex < 0) {
-        selectedGameIndex = installedGames.length - 1;
+        selectedGameIndex = libraryItemCount - 1;
     }
 
-    if (selectedGameIndex >= installedGames.length) {
+    if (selectedGameIndex >= libraryItemCount) {
         selectedGameIndex = 0;
     }
 
@@ -992,6 +1597,12 @@ function moveSelectedElement(container, selector, direction) {
     const elements =
         Array.from(
             container?.querySelectorAll(selector) || []
+        )
+        .filter(
+            (element) =>
+                !element.disabled &&
+                !element.classList.contains("disabled") &&
+                element.offsetParent !== null
         );
 
     if (!elements.length) {
@@ -1131,11 +1742,33 @@ function moveUiSelection(direction) {
 
     if (
         currentState ===
-        ONA_STATE.CONTROLLERS
+        ONA_STATE.STORE
     ) {
         moveSelectedElement(
+            storeScreen,
+            ".store-item",
+            step
+        );
+        return;
+    }
+
+    if (
+        currentState ===
+        ONA_STATE.SETTINGS
+    ) {
+        moveSettingsSelection(direction);
+        return;
+    }
+
+    if (
+        currentState ===
+        ONA_STATE.CONTROLLERS
+    ) {
+        ensureControllersFocus();
+
+        moveSelectedElement(
             controllersScreen,
-            ".controller-slot",
+            ".controller-action:not(.disabled)",
             step
         );
         return;
@@ -1403,8 +2036,40 @@ function updateControllersScreen() {
     if (controllersStatus) {
         controllersStatus.textContent =
             playerCountValue > 0
-                ? `${playerCountValue} CONTROLLER${playerCountValue === 1 ? "" : "S"} CONNECTED`
+                ? "CONTROLLER 1 / CONNECTED"
                 : "WAITING FOR CONTROLLER";
+    }
+
+    if (controllersPlayerName) {
+        controllersPlayerName.textContent =
+            currentProfile.name;
+    }
+
+}
+
+
+function ensureControllersFocus() {
+
+    const actions =
+        Array.from(
+            controllersScreen?.querySelectorAll(
+                ".controller-action:not(.disabled)"
+            ) || []
+        );
+
+    if (!actions.length) {
+        return;
+    }
+
+    if (
+        !actions.some(
+            (action) =>
+                action.classList.contains("selected")
+        )
+    ) {
+        actions[0]
+            .classList
+            .add("selected");
     }
 
 }
@@ -1413,7 +2078,7 @@ function updateControllersScreen() {
 function selectedControllerAction() {
 
     return controllersScreen
-        ?.querySelector(".controller-slot.selected")
+        ?.querySelector(".controller-action.selected")
         ?.dataset
         ?.controllerAction;
 
@@ -1442,6 +2107,27 @@ function activateSelectedControllerAction() {
     }
 
 }
+
+
+controllersScreen
+    ?.querySelectorAll(".controller-action")
+    .forEach(
+        (action) => {
+            action.addEventListener(
+                "click",
+                () => {
+                    controllersScreen
+                        ?.querySelectorAll(".controller-action")
+                        .forEach(
+                            (item) =>
+                                item.classList.remove("selected")
+                        );
+
+                    action.classList.add("selected");
+                }
+            );
+        }
+    );
 
 
 function openControllerLab() {
@@ -1482,6 +2168,8 @@ function updateControllerLabProfile() {
             Number(controllerProfile.stick?.sensitivity ?? 1).toFixed(2);
     }
 
+    updateControllerLabBridgeStatus();
+
 }
 
 
@@ -1510,29 +2198,11 @@ async function updateControllerLabBridgeStatus() {
         return;
     }
 
-    try {
+    const stick =
+        controllerProfile.stick || {};
 
-        const bridge =
-            await invoke("game_input_bridge_status");
-
-        labBridgeStatus.textContent =
-            bridge.running
-                ? bridge.address
-                : "OFFLINE";
-
-    }
-
-    catch (error) {
-
-        labBridgeStatus.textContent =
-            "UNKNOWN";
-
-        console.error(
-            "[Controller Lab] Bridge status failed:",
-            error
-        );
-
-    }
+    labBridgeStatus.textContent =
+        `${Number(stick.centerX || 0).toFixed(2)} / ${Number(stick.centerY || 0).toFixed(2)}`;
 
 }
 
@@ -1625,6 +2295,16 @@ function updateControllerLabStick(x, y) {
             calibratedY.toFixed(2);
     }
 
+    if (labRawStickX) {
+        labRawStickX.textContent =
+            x.toFixed(2);
+    }
+
+    if (labRawStickY) {
+        labRawStickY.textContent =
+            y.toFixed(2);
+    }
+
     if (labStickDot) {
         labStickDot.style.transform =
             `translate(calc(-50% + ${calibratedX * 72}px), calc(-50% + ${calibratedY * 72}px))`;
@@ -1694,6 +2374,8 @@ function setControllerLabCenter() {
         lastRawStick.x,
         lastRawStick.y
     );
+
+    updateControllerLabBridgeStatus();
 
 }
 
@@ -2383,7 +3065,15 @@ window.addEventListener(
 
                     event.preventDefault();
 
-                    launchSelectedGame();
+                    if (
+                        installedGames.length &&
+                        selectedGameIndex < installedGames.length
+                    ) {
+                        launchSelectedGame();
+                    }
+                    else {
+                        importGameButton?.click();
+                    }
 
                     break;
 
@@ -2404,10 +3094,152 @@ window.addEventListener(
 
         if (
             currentState ===
+            ONA_STATE.STORE
+        ) {
+
+            switch (event.key) {
+
+                case "ArrowLeft":
+
+                case "ArrowUp":
+
+                    event.preventDefault();
+
+                    moveSelectedElement(
+                        storeScreen,
+                        ".store-item",
+                        -1
+                    );
+
+                    break;
+
+
+                case "ArrowRight":
+
+                case "ArrowDown":
+
+                    event.preventDefault();
+
+                    moveSelectedElement(
+                        storeScreen,
+                        ".store-item",
+                        1
+                    );
+
+                    break;
+
+
+                case "Backspace":
+
+                    event.preventDefault();
+
+                    transitionTo(
+                        ONA_STATE.MAIN_MENU
+                    );
+
+                    break;
+
+            }
+
+        }
+
+        if (
+            currentState ===
+            ONA_STATE.SETTINGS
+        ) {
+
+            switch (event.key) {
+
+                case "ArrowLeft":
+
+                    event.preventDefault();
+                    moveSettingsSelection("left");
+                    break;
+
+                case "ArrowRight":
+
+                    event.preventDefault();
+                    moveSettingsSelection("right");
+                    break;
+
+                case "ArrowUp":
+
+                    event.preventDefault();
+                    moveSettingsSelection("up");
+                    break;
+
+                case "ArrowDown":
+
+                    event.preventDefault();
+                    moveSettingsSelection("down");
+                    break;
+
+                case "Enter":
+
+                case " ":
+
+                    event.preventDefault();
+                    activateSettingsSelection();
+                    break;
+
+                case "Backspace":
+
+                    event.preventDefault();
+
+                    if (settingsFocusLevel === "option") {
+                        settingsFocusLevel = "category";
+                        settingsPanel
+                            ?.querySelectorAll(".settings-option")
+                            .forEach((option) => option.classList.remove("selected"));
+                    }
+                    else {
+                        transitionTo(ONA_STATE.MAIN_MENU);
+                    }
+
+                    break;
+
+            }
+
+        }
+
+        if (
+            currentState ===
             ONA_STATE.CONTROLLERS
         ) {
 
             switch (event.key) {
+
+                case "ArrowLeft":
+
+                case "ArrowUp":
+
+                    event.preventDefault();
+
+                    ensureControllersFocus();
+                    moveSelectedElement(
+                        controllersScreen,
+                        ".controller-action:not(.disabled)",
+                        -1
+                    );
+
+                    break;
+
+
+                case "ArrowRight":
+
+                case "ArrowDown":
+
+                    event.preventDefault();
+
+                    ensureControllersFocus();
+                    moveSelectedElement(
+                        controllersScreen,
+                        ".controller-action:not(.disabled)",
+                        1
+                    );
+
+                    break;
+
 
                 case "Enter":
 
@@ -2415,6 +3247,7 @@ window.addEventListener(
 
                     event.preventDefault();
 
+                    ensureControllersFocus();
                     activateSelectedControllerAction();
 
                     break;
@@ -3088,6 +3921,8 @@ tauri.event.listen(
             currentState === ONA_STATE.MAIN_MENU ||
             currentState === ONA_STATE.CONTROLLERS ||
             currentState === ONA_STATE.GAME_LIBRARY ||
+            currentState === ONA_STATE.STORE ||
+            currentState === ONA_STATE.SETTINGS ||
             currentState === ONA_STATE.QUICK_MENU
             ) {
 
@@ -3298,7 +4133,7 @@ tauri.event.listen(
             }
 
 
-            // D-PAD / botones direccionales
+            // Direction events
             if (
                 button === "LEFT" ||
                 button === "UP"
@@ -3405,14 +4240,14 @@ tauri.event.listen(
                     }
 
 
-                    // GAME LIBRARY
+                    // STORE
                     if (
                         selected.dataset.action
-                        === "library"
+                        === "store"
                     ) {
 
                         transitionTo(
-                            ONA_STATE.GAME_LIBRARY
+                            ONA_STATE.STORE
                         );
 
                     }
@@ -3437,8 +4272,8 @@ tauri.event.listen(
                         === "settings"
                     ) {
 
-                        console.log(
-                            "[ONA] Settings selected"
+                        transitionTo(
+                            ONA_STATE.SETTINGS
                         );
 
                     }
@@ -3577,6 +4412,97 @@ tauri.event.listen(
 
 
         // =====================================================
+        // STORE
+        // =====================================================
+
+        if (
+            currentState ===
+            ONA_STATE.STORE
+        ) {
+
+            if (
+                button === "A"
+            ) {
+                return;
+            }
+
+            if (
+                button === "B"
+            ) {
+
+                transitionTo(
+                    ONA_STATE.MAIN_MENU
+                );
+
+                return;
+
+            }
+
+            if (
+                button === "START"
+            ) {
+
+                openSystemMenu();
+                return;
+
+            }
+
+            return;
+
+        }
+
+
+        // =====================================================
+        // SETTINGS
+        // =====================================================
+
+        if (
+            currentState ===
+            ONA_STATE.SETTINGS
+        ) {
+
+            if (
+                button === "A"
+            ) {
+                activateSettingsSelection();
+                return;
+            }
+
+            if (
+                button === "B"
+            ) {
+                if (settingsFocusLevel === "option") {
+                    settingsFocusLevel =
+                        "category";
+                    settingsPanel
+                        ?.querySelectorAll(".settings-option")
+                        .forEach(
+                            (option) =>
+                                option.classList.remove("selected")
+                        );
+                }
+                else {
+                    transitionTo(
+                        ONA_STATE.MAIN_MENU
+                    );
+                }
+
+                return;
+            }
+
+            if (
+                button === "START"
+            ) {
+                openSystemMenu();
+                return;
+            }
+
+            return;
+
+        }
+
+
+        // =====================================================
         // GAME LIBRARY
         // =====================================================
 
@@ -3589,7 +4515,16 @@ tauri.event.listen(
                 button === "A"
             ) {
 
-                launchSelectedGame();
+                if (
+                    installedGames.length &&
+                    selectedGameIndex < installedGames.length
+                ) {
+                    launchSelectedGame();
+                }
+                else {
+                    importGameButton?.click();
+                }
+
                 return;
 
             }
@@ -3703,6 +4638,16 @@ console.log(
 renderControllerLabButtons();
 
 loadControllerProfile();
+
+invoke("load_shell_settings")
+    .then((settings) => {
+        shellSettings =
+            settings;
+        applyShellSettings();
+    })
+    .catch((error) =>
+        console.error("[ONA Settings] Initial load failed:", error)
+    );
 
 
 startIntro();

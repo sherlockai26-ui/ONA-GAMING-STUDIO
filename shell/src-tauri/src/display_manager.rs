@@ -66,6 +66,10 @@ fn detect_from_handle(app_handle: &AppHandle<Wry>) -> tauri::Result<DisplayLayou
     Ok(DisplayLayout::from_monitors(monitors, primary_monitor))
 }
 
+pub fn detect_layout(app_handle: &AppHandle<Wry>) -> tauri::Result<DisplayLayout> {
+    detect_from_handle(app_handle)
+}
+
 impl DisplayLayout {
     fn from_monitors(monitors: Vec<Monitor>, primary_monitor: Option<Monitor>) -> Self {
         let primary_signature = primary_monitor.as_ref().map(DisplaySignature::from_monitor);

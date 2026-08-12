@@ -477,12 +477,12 @@
 
                 <button
                     class="menu-item home-system-card"
-                    data-action="library"
+                    data-action="store"
                 >
-                    <span class="home-system-icon">LIB</span>
+                    <span class="home-system-icon">STR</span>
                     <span>
-                        <strong>GAME LIBRARY</strong>
-                        <small>Browse and play your games</small>
+                        <strong>STORE</strong>
+                        <small>Discover and get new games</small>
                     </span>
                 </button>
 
@@ -510,6 +510,169 @@
                     </span>
                 </button>
 
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- =================================================
+         ONA STORE
+    ================================================== -->
+
+    <section
+        id="store-screen"
+        class="screen"
+    >
+
+        <div class="store-content">
+
+            <div class="store-header">
+
+                <div>
+
+                    <div class="eyebrow">
+                        DISCOVER YOUR NEXT GAME.
+                    </div>
+
+                    <h1>
+                        ONA STORE
+                    </h1>
+
+                </div>
+
+                <div class="store-player-chip">
+                    <span
+                        id="store-player-avatar"
+                        class="store-player-avatar"
+                    >
+                        P1
+                    </span>
+
+                    <span>
+                        <strong id="store-player-name">
+                            PLAYER 1
+                        </strong>
+                        <small>ONLINE</small>
+                    </span>
+                </div>
+
+            </div>
+
+            <div class="store-stage">
+
+                <button class="store-item store-empty-card selected">
+
+                    <span class="store-card-kicker">
+                        ONA STORE
+                    </span>
+
+                    <span class="store-card-title">
+                        THE STORE IS GETTING READY.
+                    </span>
+
+                    <span class="store-card-copy">
+                        Discover and get new games from ONA.
+                    </span>
+
+                    <span class="store-card-action">
+                        COMING SOON
+                    </span>
+
+                </button>
+
+                <div class="store-category-grid">
+
+                    <button class="store-item store-category">
+                        FEATURED
+                    </button>
+
+                    <button class="store-item store-category">
+                        NEW & TRENDING
+                    </button>
+
+                    <button class="store-item store-category">
+                        LOCAL MULTIPLAYER
+                    </button>
+
+                    <button class="store-item store-category">
+                        ONA ORIGINALS
+                    </button>
+
+                    <button class="store-item store-category">
+                        FREE TO PLAY
+                    </button>
+
+                    <button class="store-item store-category">
+                        SEARCH
+                    </button>
+
+                </div>
+
+            </div>
+
+            <div class="store-footer">
+                <span>A SELECT</span>
+                <span>B BACK</span>
+                <span>START QUICK MENU</span>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- =================================================
+         SETTINGS
+    ================================================== -->
+
+    <section
+        id="settings-screen"
+        class="screen"
+    >
+
+        <div class="settings-content">
+
+            <div class="settings-header">
+                <div>
+                    <div class="eyebrow">
+                        ONA SYSTEM
+                    </div>
+
+                    <h1>
+                        SETTINGS
+                    </h1>
+                </div>
+            </div>
+
+            <div class="settings-layout">
+
+                <nav
+                    id="settings-categories"
+                    class="settings-categories"
+                >
+                    <button class="settings-category selected" data-settings-category="general">GENERAL</button>
+                    <button class="settings-category" data-settings-category="display">DISPLAY</button>
+                    <button class="settings-category" data-settings-category="audio">AUDIO</button>
+                    <button class="settings-category" data-settings-category="personalization">PERSONALIZATION</button>
+                    <button class="settings-category" data-settings-category="network">NETWORK</button>
+                    <button class="settings-category" data-settings-category="storage">STORAGE</button>
+                    <button class="settings-category" data-settings-category="system">SYSTEM</button>
+                    <button class="settings-category" data-settings-category="power">POWER</button>
+                </nav>
+
+                <section
+                    id="settings-panel"
+                    class="settings-panel"
+                ></section>
+
+            </div>
+
+            <div class="settings-footer">
+                <span>A SELECT</span>
+                <span>B BACK</span>
+                <span>START QUICK MENU</span>
             </div>
 
         </div>
@@ -549,7 +712,7 @@
 
                 <button
                     id="change-profile-button"
-                    class="controller-slot selected"
+                    class="controller-slot controller-action controller-player-slot selected"
                     data-controller-action="profile"
                 >
 
@@ -560,14 +723,17 @@
                     <div class="controller-slot-info">
 
                         <div class="controller-slot-name">
-                            PLAYER 1 CONTROLLER
+                            PLAYER 1
+                            <span id="controllers-player-name">
+                                PLAYER 1
+                            </span>
                         </div>
 
                         <div
                             id="controllers-status"
                             class="controller-slot-status"
                         >
-                            CONTROLLER CONNECTED
+                            CONTROLLER 1 / CONNECTED
                         </div>
 
                     </div>
@@ -580,7 +746,7 @@
 
                 <button
                     id="add-controller-button"
-                    class="controller-slot"
+                    class="controller-slot controller-action"
                     data-controller-action="add"
                 >
 
@@ -601,14 +767,28 @@
                     </div>
 
                     <div class="controller-calibrate-action">
-                        OPEN QR
+                        ADD CONTROLLER
                     </div>
 
                 </button>
 
+            </div>
+
+            <div class="controller-settings-panel">
+
+                <div>
+                    <div class="eyebrow">
+                        CONTROLLER SETTINGS
+                    </div>
+
+                    <p>
+                        Manage the selected player's controller.
+                    </p>
+                </div>
+
                 <button
                     id="calibrate-controller-button"
-                    class="controller-slot"
+                    class="controller-slot controller-action controller-settings-action"
                     data-controller-action="calibrate"
                 >
 
@@ -619,11 +799,11 @@
                     <div class="controller-slot-info">
 
                         <div class="controller-slot-name">
-                            CALIBRATE CONTROLLER
+                            OPEN CONTROLLER LAB
                         </div>
 
                         <div class="controller-slot-status">
-                            CONTROLLER LAB
+                            Test inputs and calibrate joystick
                         </div>
 
                     </div>
@@ -631,7 +811,7 @@
                     <div
                         class="controller-calibrate-action"
                     >
-                        CALIBRATE CONTROLLER
+                        OPEN LAB
                     </div>
 
                 </button>
@@ -665,12 +845,11 @@
                 <div>
 
                     <div class="eyebrow">
-                        ONA GAME LIBRARY
+                        YOUR GAMES. ONE PLACE.
                     </div>
 
                     <h1>
-                        YOUR
-                        <span>GAMES</span>
+                        GAME LIBRARY
                     </h1>
 
                 </div>
@@ -681,6 +860,22 @@
                 >
                     IMPORT GAME
                 </button>
+
+                <div class="library-player-chip">
+                    <span
+                        id="library-player-avatar"
+                        class="library-player-avatar"
+                    >
+                        P1
+                    </span>
+
+                    <span>
+                        <strong id="library-player-name">
+                            PLAYER 1
+                        </strong>
+                        <small>ONLINE</small>
+                    </span>
+                </div>
 
             </div>
 
@@ -749,12 +944,19 @@
 
             </div>
 
+            <div class="lab-tabs">
+                <span class="active">TEST INPUTS</span>
+                <span>CALIBRATION</span>
+                <span>PROFILE</span>
+                <span>LAYOUT</span>
+            </div>
+
             <div class="lab-grid">
 
                 <section class="lab-panel lab-stick-panel">
 
                     <div class="lab-panel-title">
-                        JOYSTICK
+                        TEST INPUTS / JOYSTICK
                     </div>
 
                     <div class="stick-stage">
@@ -776,12 +978,22 @@
                     <div class="stick-readout">
 
                         <span>
-                            X
+                            RAW X
+                            <strong id="lab-raw-stick-x">0.00</strong>
+                        </span>
+
+                        <span>
+                            RAW Y
+                            <strong id="lab-raw-stick-y">0.00</strong>
+                        </span>
+
+                        <span>
+                            CAL X
                             <strong id="lab-stick-x">0.00</strong>
                         </span>
 
                         <span>
-                            Y
+                            CAL Y
                             <strong id="lab-stick-y">0.00</strong>
                         </span>
 
@@ -790,7 +1002,13 @@
                     <div class="lab-calibration">
 
                         <div class="lab-panel-title">
-                            CALIBRATION
+                            CALIBRATION / CURRENT JOYSTICK
+                        </div>
+
+                        <div class="calibration-flow">
+                            RAW INPUT
+                            <span>&rarr;</span>
+                            CALIBRATED INPUT
                         </div>
 
                         <label class="lab-field">
@@ -842,7 +1060,7 @@
                 <section class="lab-panel">
 
                     <div class="lab-panel-title">
-                        TEST BUTTONS
+                        TEST INPUTS / BUTTONS
                     </div>
 
                     <p class="lab-instruction">
@@ -878,8 +1096,8 @@
 
                     <div class="profile-readout">
 
-                        <span>BRIDGE</span>
-                        <strong id="lab-bridge-status">UNKNOWN</strong>
+                        <span>CENTER OFFSET</span>
+                        <strong id="lab-bridge-status">0.00 / 0.00</strong>
 
                     </div>
 
@@ -892,10 +1110,23 @@
 
                 </section>
 
+                <section class="lab-panel lab-layout-panel">
+
+                    <div class="lab-panel-title">
+                        LAYOUT
+                    </div>
+
+                    <div class="layout-current">
+                        <strong>THUMB</strong>
+                        <span>Optimized for mobile thumb control.</span>
+                    </div>
+
+                </section>
+
             </div>
 
             <div class="lab-footer">
-                <span>A SAVE</span>
+                <span>A SELECT</span>
                 <span>B BACK</span>
                 <span>START QUICK MENU</span>
             </div>
