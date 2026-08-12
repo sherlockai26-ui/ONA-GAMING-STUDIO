@@ -102,7 +102,7 @@ impl DisplayLayout {
         }
     }
 
-    fn target_display(&self) -> Option<&DisplayInfo> {
+    pub fn target_display(&self) -> Option<&DisplayInfo> {
         self.target_index.and_then(|target_index| {
             self.displays
                 .iter()
@@ -186,7 +186,7 @@ fn choose_target_display(displays: &[DisplayInfo], primary_index: Option<usize>)
         .or(primary_index)
 }
 
-fn apply_layout_to_window(
+pub fn apply_layout_to_window(
     window: &WebviewWindow<Wry>,
     layout: &DisplayLayout,
 ) -> tauri::Result<()> {

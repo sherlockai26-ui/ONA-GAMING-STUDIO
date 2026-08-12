@@ -2,6 +2,7 @@
 
 // Importamos los módulos necesarios de ona_core
 mod display_manager;
+mod game_handoff;
 
 use ona_core::game_manager::{
     catalog::GameCatalog,
@@ -21,7 +22,10 @@ use ona_core::launcher::{
     state::RunningGameStatus,
 };
 use ona_core::qr::generator::{generate, generate_svg};
-use ona_core::runtime::lifecycle::GameLifecycleState;
+use ona_core::runtime::{
+    bridge::{GameLifecycleBridge, GameLifecycleBridgeStatus, GameRuntimeSignal},
+    lifecycle::GameLifecycleState,
+};
 use ona_core::session::manager::create_session;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::Mutex};
@@ -30,6 +34,7 @@ use tauri::{Emitter, Manager};
 struct OnaGameRuntime {
     launcher: GameLauncher,
     input_bridge: Mutex<GameInputBridge>,
+    lifecycle_bridge: Mutex<GameLifecycleBridge>,
 }
 
 #[derive(Serialize)]
@@ -245,15 +250,61 @@ fn launch_installed_game(
         .lock()
         .map_err(|error| error.to_string())?
         .status();
+    let lifecycle_status = runtime
+        .lifecycle_bridge
+        .lock()
+        .map_err(|error| error.to_string())?
+        .status();
+    let display_layout =
+        display_manager::detect_layout(&app_handle).map_err(|error| error.to_string())?;
+    let target_display = display_layout.target_display().ok_or_else(|| {
+        "GAMING_DISPLAY_NOT_AVAILABLE: Select another display before launching the game."
+            .to_string()
+    })?;
+    let manifest_resolution = parse_resolution(&profile.resolution);
+    let display_width = manifest_resolution
+        .map(|resolution| resolution.0)
+        .unwrap_or(target_display.width);
+    let display_height = manifest_resolution
+        .map(|resolution| resolution.1)
+        .unwrap_or(target_display.height);
+
+    runtime
+        .lifecycle_bridge
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clear();
 
     runtime.launcher.launch_with_runtime(
         &profile,
         OnaGameRuntimeContext {
             input_host: bridge_status.host,
             input_port: bridge_status.port,
+            lifecycle_host: lifecycle_status.host,
+            lifecycle_port: lifecycle_status.port,
             player_id: None,
+            display_mode: if profile.fullscreen {
+                "CONSOLE_FULLSCREEN".to_string()
+            } else {
+                "WINDOWED".to_string()
+            },
+            display_id: target_display.identifier.clone(),
+            display_name: target_display.name.clone(),
+            display_x: target_display.x,
+            display_y: target_display.y,
+            display_width: Some(display_width),
+            display_height: Some(display_height),
+            display_scale_factor: target_display.scale_factor,
+            display_target: Some(target_display.identifier.clone()),
         },
     )
+}
+
+fn parse_resolution(resolution: &Option<String>) -> Option<(u32, u32)> {
+    let resolution = resolution.as_deref()?;
+    let (width, height) = resolution.split_once('x')?;
+
+    Some((width.trim().parse().ok()?, height.trim().parse().ok()?))
 }
 
 #[tauri::command]
@@ -266,6 +317,39 @@ fn prepare_shell_for_game(app_handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn wait_for_game_handoff_ready(
+    app_handle: tauri::AppHandle,
+    runtime: tauri::State<'_, OnaGameRuntime>,
+    pid: u32,
+    timeout_ms: u64,
+) -> Result<game_handoff::GameHandoffStatus, String> {
+    let layout = display_manager::detect_layout(&app_handle).map_err(|error| error.to_string())?;
+    let target = layout.target_display().ok_or_else(|| {
+        "GAMING_DISPLAY_NOT_AVAILABLE: Select another display before launching the game."
+            .to_string()
+    })?;
+    let target = game_handoff::TargetDisplayBounds {
+        x: target.x,
+        y: target.y,
+        width: target.width,
+        height: target.height,
+    };
+    let lifecycle_bridge = runtime
+        .lifecycle_bridge
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        game_handoff::wait_for_game_handoff_ready(pid, target, timeout_ms, || {
+            lifecycle_bridge.has_signal(GameRuntimeSignal::GameDisplayReady)
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn restore_shell_after_game(app_handle: tauri::AppHandle) -> Result<(), String> {
     let window = app_handle
         .get_webview_window("main")
@@ -273,9 +357,8 @@ fn restore_shell_after_game(app_handle: tauri::AppHandle) -> Result<(), String> 
 
     let _ = window.unminimize();
     window.show().map_err(|error| error.to_string())?;
-    window
-        .set_fullscreen(true)
-        .map_err(|error| error.to_string())?;
+    let layout = display_manager::detect_layout(&app_handle).map_err(|error| error.to_string())?;
+    display_manager::apply_layout_to_window(&window, &layout).map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())
 }
 
@@ -317,6 +400,18 @@ fn game_input_bridge_status(
 ) -> Result<GameInputBridgeStatus, String> {
     let bridge = runtime
         .input_bridge
+        .lock()
+        .map_err(|error| error.to_string())?;
+
+    Ok(bridge.status())
+}
+
+#[tauri::command]
+fn game_lifecycle_bridge_status(
+    runtime: tauri::State<'_, OnaGameRuntime>,
+) -> Result<GameLifecycleBridgeStatus, String> {
+    let bridge = runtime
+        .lifecycle_bridge
         .lock()
         .map_err(|error| error.to_string())?;
 
@@ -392,6 +487,10 @@ pub fn run() {
                 GameInputBridge::start_localhost(0)
                     .expect("ONA input bridge could not bind to localhost"),
             ),
+            lifecycle_bridge: Mutex::new(
+                GameLifecycleBridge::start_localhost(0)
+                    .expect("ONA lifecycle bridge could not bind to localhost"),
+            ),
         })
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -400,12 +499,14 @@ pub fn run() {
             scan_game_installation_sources,
             import_local_game,
             launch_installed_game,
+            wait_for_game_handoff_ready,
             prepare_shell_for_game,
             restore_shell_after_game,
             running_game_status,
             uninstall_installed_game,
             terminate_running_game,
             game_input_bridge_status,
+            game_lifecycle_bridge_status,
             minimize_main_window,
             load_shell_settings,
             save_shell_settings,

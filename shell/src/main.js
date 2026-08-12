@@ -2498,14 +2498,43 @@ async function launchSelectedGame() {
 
         if (status.pid) {
             showGameLifecycleOverlay(
-                "RUNNING",
+                "LAUNCHING",
                 game.name,
-                `PID ${status.pid}`
+                `PID ${status.pid} / Waiting for display handoff.`
             );
 
-            await invoke(
-                "prepare_shell_for_game"
+            const handoff =
+                await invoke(
+                    "wait_for_game_handoff_ready",
+                    {
+                        pid:
+                            status.pid,
+                        timeoutMs:
+                            5000
+                    }
+                );
+
+            showGameLifecycleOverlay(
+                handoff.handshakeConfirmed
+                    ? "GAME READY"
+                    : handoff.legacyFallback
+                        ? "LEGACY HANDOFF"
+                        : "DISPLAY NOT READY",
+                game.name,
+                handoff.handshakeConfirmed
+                    ? "Game confirmed display ready."
+                    : handoff.legacyFallback
+                        ? "Game window is on the ONA Gaming Display without runtime handshake."
+                        : handoff.windowReady
+                            ? "Game window is not on the ONA Gaming Display. ONA will stay visible."
+                            : "Game display was not confirmed. ONA will stay visible."
             );
+
+            if (handoff.handshakeConfirmed || handoff.legacyFallback) {
+                await invoke(
+                    "prepare_shell_for_game"
+                );
+            }
 
             startRunningGameMonitor(game);
         }

@@ -33,7 +33,10 @@ mod tests {
             events::{ButtonState, OnaButton, OnaInputEvent},
         },
         launcher::process::{GameLauncher, OnaGameRuntimeContext},
-        runtime::lifecycle::GameLifecycleState,
+        runtime::{
+            bridge::{GameLifecycleBridge, GameRuntimeSignal},
+            lifecycle::GameLifecycleState,
+        },
     };
 
     #[test]
@@ -180,6 +183,8 @@ mod tests {
         let bridge = GameInputBridge::start_localhost(0).expect("input bridge should start");
         let bridge_status = bridge.status();
         let launcher = GameLauncher::new();
+        let lifecycle = GameLifecycleBridge::start_localhost(0).expect("lifecycle bridge starts");
+        let lifecycle_status = lifecycle.status();
 
         let status = launcher
             .launch_with_runtime(
@@ -187,7 +192,18 @@ mod tests {
                 OnaGameRuntimeContext {
                     input_host: bridge_status.host.clone(),
                     input_port: bridge_status.port,
+                    lifecycle_host: lifecycle_status.host.clone(),
+                    lifecycle_port: lifecycle_status.port,
                     player_id: None,
+                    display_mode: "CONSOLE_FULLSCREEN".to_string(),
+                    display_id: "TV@1920,0:1920x1080".to_string(),
+                    display_name: Some("TV".to_string()),
+                    display_x: 1920,
+                    display_y: 0,
+                    display_width: Some(1920),
+                    display_height: Some(1080),
+                    display_scale_factor: 1.0,
+                    display_target: Some("TV@1920,0:1920x1080".to_string()),
                 },
             )
             .expect("game should launch with runtime context");
@@ -210,9 +226,44 @@ mod tests {
         assert!(captured.contains("ONA_PROTOCOL_VERSION=1"));
         assert!(captured.contains(&format!("ONA_INPUT_HOST={}", bridge_status.host)));
         assert!(captured.contains(&format!("ONA_INPUT_PORT={}", bridge_status.port)));
+        assert!(captured.contains(&format!("ONA_LIFECYCLE_HOST={}", lifecycle_status.host)));
+        assert!(captured.contains(&format!("ONA_LIFECYCLE_PORT={}", lifecycle_status.port)));
+        assert!(captured.contains("ONA_DISPLAY_MODE=CONSOLE_FULLSCREEN"));
+        assert!(captured.contains("ONA_DISPLAY_ID=TV@1920,0:1920x1080"));
+        assert!(captured.contains("ONA_DISPLAY_NAME=TV"));
+        assert!(captured.contains("ONA_DISPLAY_X=1920"));
+        assert!(captured.contains("ONA_DISPLAY_Y=0"));
+        assert!(captured.contains("ONA_DISPLAY_WIDTH=1920"));
+        assert!(captured.contains("ONA_DISPLAY_HEIGHT=1080"));
+        assert!(captured.contains("ONA_DISPLAY_SCALE_FACTOR=1"));
+        assert!(captured.contains("ONA_DISPLAY_TARGET=TV@1920,0:1920x1080"));
 
         let _ = launcher.terminate();
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn lifecycle_bridge_receives_game_display_ready_signal() {
+        use std::io::Write;
+
+        let bridge = GameLifecycleBridge::start_localhost(0).expect("lifecycle bridge starts");
+        let status = bridge.status();
+        let mut stream =
+            TcpStream::connect(status.address).expect("game should connect to lifecycle bridge");
+
+        writeln!(stream, "GAME_STARTED").expect("signal should send");
+        writeln!(stream, r#"{{"event":"GAME_DISPLAY_READY"}}"#).expect("signal should send");
+
+        for _ in 0..20 {
+            if bridge.has_signal(GameRuntimeSignal::GameDisplayReady) {
+                break;
+            }
+
+            thread::sleep(Duration::from_millis(25));
+        }
+
+        assert!(bridge.has_signal(GameRuntimeSignal::GameStarted));
+        assert!(bridge.has_signal(GameRuntimeSignal::GameDisplayReady));
     }
 
     #[test]
@@ -339,11 +390,22 @@ mod tests {
                 "fn main() {{
                     let output = r#\"{output}\"#;
                     let content = format!(
-                        \"ONA_RUNTIME={{}}\\nONA_PROTOCOL_VERSION={{}}\\nONA_INPUT_HOST={{}}\\nONA_INPUT_PORT={{}}\\n\",
+                        \"ONA_RUNTIME={{}}\\nONA_PROTOCOL_VERSION={{}}\\nONA_INPUT_HOST={{}}\\nONA_INPUT_PORT={{}}\\nONA_LIFECYCLE_HOST={{}}\\nONA_LIFECYCLE_PORT={{}}\\nONA_DISPLAY_MODE={{}}\\nONA_DISPLAY_ID={{}}\\nONA_DISPLAY_NAME={{}}\\nONA_DISPLAY_X={{}}\\nONA_DISPLAY_Y={{}}\\nONA_DISPLAY_WIDTH={{}}\\nONA_DISPLAY_HEIGHT={{}}\\nONA_DISPLAY_SCALE_FACTOR={{}}\\nONA_DISPLAY_TARGET={{}}\\n\",
                         std::env::var(\"ONA_RUNTIME\").unwrap_or_default(),
                         std::env::var(\"ONA_PROTOCOL_VERSION\").unwrap_or_default(),
                         std::env::var(\"ONA_INPUT_HOST\").unwrap_or_default(),
-                        std::env::var(\"ONA_INPUT_PORT\").unwrap_or_default()
+                        std::env::var(\"ONA_INPUT_PORT\").unwrap_or_default(),
+                        std::env::var(\"ONA_LIFECYCLE_HOST\").unwrap_or_default(),
+                        std::env::var(\"ONA_LIFECYCLE_PORT\").unwrap_or_default(),
+                        std::env::var(\"ONA_DISPLAY_MODE\").unwrap_or_default(),
+                        std::env::var(\"ONA_DISPLAY_ID\").unwrap_or_default(),
+                        std::env::var(\"ONA_DISPLAY_NAME\").unwrap_or_default(),
+                        std::env::var(\"ONA_DISPLAY_X\").unwrap_or_default(),
+                        std::env::var(\"ONA_DISPLAY_Y\").unwrap_or_default(),
+                        std::env::var(\"ONA_DISPLAY_WIDTH\").unwrap_or_default(),
+                        std::env::var(\"ONA_DISPLAY_HEIGHT\").unwrap_or_default(),
+                        std::env::var(\"ONA_DISPLAY_SCALE_FACTOR\").unwrap_or_default(),
+                        std::env::var(\"ONA_DISPLAY_TARGET\").unwrap_or_default()
                     );
                     std::fs::write(output, content).unwrap();
                 }}"
@@ -393,7 +455,18 @@ mod tests {
                 echo ONA_RUNTIME=$ONA_RUNTIME > \"{output}\"\n\
                 echo ONA_PROTOCOL_VERSION=$ONA_PROTOCOL_VERSION >> \"{output}\"\n\
                 echo ONA_INPUT_HOST=$ONA_INPUT_HOST >> \"{output}\"\n\
-                echo ONA_INPUT_PORT=$ONA_INPUT_PORT >> \"{output}\"\n"
+                echo ONA_INPUT_PORT=$ONA_INPUT_PORT >> \"{output}\"\n\
+                echo ONA_LIFECYCLE_HOST=$ONA_LIFECYCLE_HOST >> \"{output}\"\n\
+                echo ONA_LIFECYCLE_PORT=$ONA_LIFECYCLE_PORT >> \"{output}\"\n\
+                echo ONA_DISPLAY_MODE=$ONA_DISPLAY_MODE >> \"{output}\"\n\
+                echo ONA_DISPLAY_ID=$ONA_DISPLAY_ID >> \"{output}\"\n\
+                echo ONA_DISPLAY_NAME=$ONA_DISPLAY_NAME >> \"{output}\"\n\
+                echo ONA_DISPLAY_X=$ONA_DISPLAY_X >> \"{output}\"\n\
+                echo ONA_DISPLAY_Y=$ONA_DISPLAY_Y >> \"{output}\"\n\
+                echo ONA_DISPLAY_WIDTH=$ONA_DISPLAY_WIDTH >> \"{output}\"\n\
+                echo ONA_DISPLAY_HEIGHT=$ONA_DISPLAY_HEIGHT >> \"{output}\"\n\
+                echo ONA_DISPLAY_SCALE_FACTOR=$ONA_DISPLAY_SCALE_FACTOR >> \"{output}\"\n\
+                echo ONA_DISPLAY_TARGET=$ONA_DISPLAY_TARGET >> \"{output}\"\n"
             ),
         )
         .expect("test executable should be written");

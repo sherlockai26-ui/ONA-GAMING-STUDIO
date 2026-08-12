@@ -9,11 +9,22 @@ use super::state::RunningGameStatus;
 
 pub const ONA_RUNTIME_PROTOCOL_VERSION: &str = "1";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct OnaGameRuntimeContext {
     pub input_host: String,
     pub input_port: u16,
+    pub lifecycle_host: String,
+    pub lifecycle_port: u16,
     pub player_id: Option<u8>,
+    pub display_mode: String,
+    pub display_id: String,
+    pub display_name: Option<String>,
+    pub display_x: i32,
+    pub display_y: i32,
+    pub display_width: Option<u32>,
+    pub display_height: Option<u32>,
+    pub display_scale_factor: f64,
+    pub display_target: Option<String>,
 }
 
 #[derive(Debug)]
@@ -197,8 +208,34 @@ fn apply_ona_runtime_environment(command: &mut Command, runtime: &OnaGameRuntime
     command
         .env("ONA_INPUT_HOST", &runtime.input_host)
         .env("ONA_INPUT_PORT", runtime.input_port.to_string())
+        .env("ONA_LIFECYCLE_HOST", &runtime.lifecycle_host)
+        .env("ONA_LIFECYCLE_PORT", runtime.lifecycle_port.to_string())
         .env("ONA_RUNTIME", "1")
-        .env("ONA_PROTOCOL_VERSION", ONA_RUNTIME_PROTOCOL_VERSION);
+        .env("ONA_PROTOCOL_VERSION", ONA_RUNTIME_PROTOCOL_VERSION)
+        .env("ONA_DISPLAY_MODE", &runtime.display_mode)
+        .env("ONA_DISPLAY_ID", &runtime.display_id)
+        .env("ONA_DISPLAY_X", runtime.display_x.to_string())
+        .env("ONA_DISPLAY_Y", runtime.display_y.to_string())
+        .env(
+            "ONA_DISPLAY_SCALE_FACTOR",
+            runtime.display_scale_factor.to_string(),
+        );
+
+    if let Some(name) = &runtime.display_name {
+        command.env("ONA_DISPLAY_NAME", name);
+    }
+
+    if let Some(width) = runtime.display_width {
+        command.env("ONA_DISPLAY_WIDTH", width.to_string());
+    }
+
+    if let Some(height) = runtime.display_height {
+        command.env("ONA_DISPLAY_HEIGHT", height.to_string());
+    }
+
+    if let Some(target) = &runtime.display_target {
+        command.env("ONA_DISPLAY_TARGET", target);
+    }
 
     if let Some(player_id) = runtime.player_id {
         command.env("ONA_PLAYER_ID", player_id.to_string());
