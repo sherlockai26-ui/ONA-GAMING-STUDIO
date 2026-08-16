@@ -1,6 +1,6 @@
 use std::{
-    io::{BufRead, BufReader},
-    net::TcpListener,
+    io::{BufRead, BufReader, Write},
+    net::{TcpListener, TcpStream},
     sync::{Arc, Mutex},
     thread,
 };
@@ -13,6 +13,8 @@ pub enum GameRuntimeSignal {
     GameStarted,
     GameWindowReady,
     GameDisplayReady,
+    GameReady,
+    GameExiting,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -25,6 +27,8 @@ pub struct GameLifecycleBridgeStatus {
     pub game_started: bool,
     pub game_window_ready: bool,
     pub game_display_ready: bool,
+    pub game_ready: bool,
+    pub game_exiting: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +37,7 @@ pub struct GameLifecycleBridge {
     host: String,
     port: u16,
     signals: Arc<Mutex<Vec<GameRuntimeSignal>>>,
+    clients: Arc<Mutex<Vec<TcpStream>>>,
     running: Arc<Mutex<bool>>,
 }
 
@@ -45,8 +50,10 @@ impl GameLifecycleBridge {
         let port = local_addr.port();
 
         let signals = Arc::new(Mutex::new(Vec::new()));
+        let clients = Arc::new(Mutex::new(Vec::new()));
         let running = Arc::new(Mutex::new(true));
         let thread_signals = Arc::clone(&signals);
+        let thread_clients = Arc::clone(&clients);
         let thread_running = Arc::clone(&running);
 
         thread::spawn(move || {
@@ -61,6 +68,12 @@ impl GameLifecycleBridge {
 
                 match stream {
                     Ok(stream) => {
+                        if let Ok(client) = stream.try_clone() {
+                            if let Ok(mut clients) = thread_clients.lock() {
+                                clients.push(client);
+                            }
+                        }
+
                         let signals = Arc::clone(&thread_signals);
                         thread::spawn(move || {
                             let reader = BufReader::new(stream);
@@ -83,6 +96,7 @@ impl GameLifecycleBridge {
             host,
             port,
             signals,
+            clients,
             running,
         })
     }
@@ -100,6 +114,14 @@ impl GameLifecycleBridge {
         }
     }
 
+    pub fn send_control_signal(&self, signal: &str) {
+        let message = format!("{signal}\n");
+
+        if let Ok(mut clients) = self.clients.lock() {
+            clients.retain_mut(|client| client.write_all(message.as_bytes()).is_ok());
+        }
+    }
+
     pub fn status(&self) -> GameLifecycleBridgeStatus {
         GameLifecycleBridgeStatus {
             running: self.running.lock().map(|running| *running).unwrap_or(false),
@@ -109,6 +131,8 @@ impl GameLifecycleBridge {
             game_started: self.has_signal(GameRuntimeSignal::GameStarted),
             game_window_ready: self.has_signal(GameRuntimeSignal::GameWindowReady),
             game_display_ready: self.has_signal(GameRuntimeSignal::GameDisplayReady),
+            game_ready: self.has_signal(GameRuntimeSignal::GameReady),
+            game_exiting: self.has_signal(GameRuntimeSignal::GameExiting),
         }
     }
 }
@@ -129,6 +153,8 @@ fn parse_runtime_signal(raw: &str) -> Option<GameRuntimeSignal> {
         "GAME_STARTED" => Some(GameRuntimeSignal::GameStarted),
         "GAME_WINDOW_READY" => Some(GameRuntimeSignal::GameWindowReady),
         "GAME_DISPLAY_READY" => Some(GameRuntimeSignal::GameDisplayReady),
+        "GAME_READY" => Some(GameRuntimeSignal::GameReady),
+        "GAME_EXITING" => Some(GameRuntimeSignal::GameExiting),
         _ => None,
     }
 }

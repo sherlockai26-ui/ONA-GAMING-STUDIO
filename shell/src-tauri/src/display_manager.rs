@@ -14,6 +14,7 @@ const DISPLAY_RECOVERY_INTERVAL: Duration = Duration::from_secs(5);
 pub struct DisplayInfo {
     pub index: usize,
     pub identifier: String,
+    pub geometry_identifier: String,
     pub name: Option<String>,
     pub x: i32,
     pub y: i32,
@@ -126,7 +127,7 @@ impl DisplayInfo {
         let position = monitor.position();
         let size = monitor.size();
         let name = monitor.name().cloned();
-        let identifier = build_identifier(
+        let geometry_identifier = build_geometry_identifier(
             index,
             name.as_deref(),
             position.x,
@@ -134,10 +135,16 @@ impl DisplayInfo {
             size.width,
             size.height,
         );
+        let native_identifier =
+            platform_native_display_id(position.x, position.y, size.width, size.height);
+        let identifier = native_identifier
+            .or_else(|| name.clone().filter(|name| name.starts_with("\\\\.\\")))
+            .unwrap_or_else(|| geometry_identifier.clone());
 
         Self {
             index,
             identifier,
+            geometry_identifier,
             name,
             x: position.x,
             y: position.y,
@@ -258,7 +265,7 @@ fn start_display_recovery(app_handle: AppHandle<Wry>, initial_snapshot: Vec<Disp
     });
 }
 
-fn build_identifier(
+fn build_geometry_identifier(
     index: usize,
     name: Option<&str>,
     x: i32,
@@ -272,6 +279,75 @@ fn build_identifier(
         .unwrap_or_else(|| format!("display-{index}"));
 
     format!("{monitor_name}@{x},{y}:{width}x{height}")
+}
+
+#[cfg(windows)]
+fn platform_native_display_id(x: i32, y: i32, width: u32, height: u32) -> Option<String> {
+    use windows::Win32::{
+        Foundation::{BOOL, LPARAM, RECT},
+        Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW},
+    };
+
+    struct SearchState {
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+        display_id: Option<String>,
+    }
+
+    unsafe extern "system" fn enum_monitor(
+        monitor: HMONITOR,
+        _hdc: HDC,
+        _rect: *mut RECT,
+        lparam: LPARAM,
+    ) -> BOOL {
+        let state = &mut *(lparam.0 as *mut SearchState);
+        let mut info = MONITORINFOEXW::default();
+        info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+
+        if GetMonitorInfoW(monitor, &mut info as *mut _ as *mut _).as_bool() {
+            let rect = info.monitorInfo.rcMonitor;
+            let monitor_width = (rect.right - rect.left).max(0) as u32;
+            let monitor_height = (rect.bottom - rect.top).max(0) as u32;
+
+            if rect.left == state.x
+                && rect.top == state.y
+                && monitor_width == state.width
+                && monitor_height == state.height
+            {
+                let name = String::from_utf16_lossy(&info.szDevice);
+                state.display_id = Some(name.trim_end_matches('\0').to_string());
+                return BOOL(0);
+            }
+        }
+
+        BOOL(1)
+    }
+
+    let mut state = SearchState {
+        x,
+        y,
+        width,
+        height,
+        display_id: None,
+    };
+
+    unsafe {
+        let _ = EnumDisplayMonitors(
+            HDC::default(),
+            None,
+            Some(enum_monitor),
+            LPARAM(&mut state as *mut _ as isize),
+        );
+    }
+
+    state.display_id.filter(|display_id| !display_id.is_empty())
+}
+
+#[cfg(not(windows))]
+fn platform_native_display_id(_x: i32, _y: i32, _width: u32, _height: u32) -> Option<String> {
+    None
 }
 
 fn log_layout(reason: &str, layout: &DisplayLayout) {

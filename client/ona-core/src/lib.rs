@@ -253,9 +253,11 @@ mod tests {
 
         writeln!(stream, "GAME_STARTED").expect("signal should send");
         writeln!(stream, r#"{{"event":"GAME_DISPLAY_READY"}}"#).expect("signal should send");
+        writeln!(stream, "GAME_READY").expect("signal should send");
+        writeln!(stream, r#"{{"event":"GAME_EXITING"}}"#).expect("signal should send");
 
         for _ in 0..20 {
-            if bridge.has_signal(GameRuntimeSignal::GameDisplayReady) {
+            if bridge.has_signal(GameRuntimeSignal::GameReady) {
                 break;
             }
 
@@ -264,6 +266,63 @@ mod tests {
 
         assert!(bridge.has_signal(GameRuntimeSignal::GameStarted));
         assert!(bridge.has_signal(GameRuntimeSignal::GameDisplayReady));
+        assert!(bridge.has_signal(GameRuntimeSignal::GameReady));
+        assert!(bridge.has_signal(GameRuntimeSignal::GameExiting));
+    }
+
+    #[test]
+    fn input_wire_protocol_v1_serializes_exact_canonical_payloads() {
+        let joystick = serde_json::to_string(&OnaInputEvent::Joystick {
+            player_id: 1,
+            x: 0.25,
+            y: -0.5,
+        })
+        .expect("joystick event should serialize");
+        let a_down = serde_json::to_string(&OnaInputEvent::Button {
+            player_id: 1,
+            button: OnaButton::A,
+            state: ButtonState::Down,
+        })
+        .expect("button event should serialize");
+        let a_up = serde_json::to_string(&OnaInputEvent::Button {
+            player_id: 1,
+            button: OnaButton::A,
+            state: ButtonState::Up,
+        })
+        .expect("button event should serialize");
+        let start_down = serde_json::to_string(&OnaInputEvent::Button {
+            player_id: 1,
+            button: OnaButton::Start,
+            state: ButtonState::Down,
+        })
+        .expect("button event should serialize");
+        let start_up = serde_json::to_string(&OnaInputEvent::Button {
+            player_id: 1,
+            button: OnaButton::Start,
+            state: ButtonState::Up,
+        })
+        .expect("button event should serialize");
+
+        assert_eq!(
+            joystick,
+            r#"{"kind":"Joystick","playerId":1,"x":0.25,"y":-0.5}"#
+        );
+        assert_eq!(
+            a_down,
+            r#"{"kind":"Button","playerId":1,"button":"A","state":"down"}"#
+        );
+        assert_eq!(
+            a_up,
+            r#"{"kind":"Button","playerId":1,"button":"A","state":"up"}"#
+        );
+        assert_eq!(
+            start_down,
+            r#"{"kind":"Button","playerId":1,"button":"START","state":"down"}"#
+        );
+        assert_eq!(
+            start_up,
+            r#"{"kind":"Button","playerId":1,"button":"START","state":"up"}"#
+        );
     }
 
     #[test]

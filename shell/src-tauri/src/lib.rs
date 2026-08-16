@@ -28,7 +28,7 @@ use ona_core::runtime::{
 };
 use ona_core::session::manager::create_session;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf, sync::Mutex};
+use std::{fs, path::PathBuf, sync::Mutex, thread, time::Duration};
 use tauri::{Emitter, Manager};
 
 struct OnaGameRuntime {
@@ -329,6 +329,7 @@ async fn wait_for_game_handoff_ready(
             .to_string()
     })?;
     let target = game_handoff::TargetDisplayBounds {
+        display_id: target.identifier.clone(),
         x: target.x,
         y: target.y,
         width: target.width,
@@ -341,9 +342,13 @@ async fn wait_for_game_handoff_ready(
         .clone();
 
     tauri::async_runtime::spawn_blocking(move || {
-        game_handoff::wait_for_game_handoff_ready(pid, target, timeout_ms, || {
-            lifecycle_bridge.has_signal(GameRuntimeSignal::GameDisplayReady)
-        })
+        game_handoff::wait_for_game_handoff_ready(
+            pid,
+            target,
+            timeout_ms,
+            || lifecycle_bridge.has_signal(GameRuntimeSignal::GameDisplayReady),
+            || lifecycle_bridge.has_signal(GameRuntimeSignal::GameReady),
+        )
     })
     .await
     .map_err(|error| error.to_string())
@@ -391,6 +396,12 @@ fn uninstall_installed_game(
 fn terminate_running_game(
     runtime: tauri::State<'_, OnaGameRuntime>,
 ) -> Result<RunningGameStatus, String> {
+    if let Ok(bridge) = runtime.lifecycle_bridge.lock() {
+        bridge.send_control_signal("ONA_SHUTDOWN");
+    }
+
+    thread::sleep(Duration::from_millis(500));
+
     runtime.launcher.terminate()
 }
 

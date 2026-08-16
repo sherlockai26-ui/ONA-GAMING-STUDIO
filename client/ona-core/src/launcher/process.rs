@@ -5,7 +5,7 @@ use std::{
 
 use crate::{game_manager::profile::GameProfile, runtime::lifecycle::GameLifecycleState};
 
-use super::state::RunningGameStatus;
+use super::{ownership::ProcessOwnership, state::RunningGameStatus};
 
 pub const ONA_RUNTIME_PROTOCOL_VERSION: &str = "1";
 
@@ -30,6 +30,7 @@ pub struct OnaGameRuntimeContext {
 #[derive(Debug)]
 pub struct GameLauncher {
     child: Arc<Mutex<Option<Child>>>,
+    ownership: Arc<Mutex<Option<ProcessOwnership>>>,
     status: Arc<Mutex<RunningGameStatus>>,
 }
 
@@ -43,6 +44,7 @@ impl GameLauncher {
     pub fn new() -> Self {
         Self {
             child: Arc::new(Mutex::new(None)),
+            ownership: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(RunningGameStatus::idle())),
         }
     }
@@ -110,8 +112,10 @@ impl GameLauncher {
             error.to_string()
         })?;
 
+        let ownership = ProcessOwnership::attach(&child);
         let pid = child.id();
         *self.child.lock().map_err(|error| error.to_string())? = Some(child);
+        *self.ownership.lock().map_err(|error| error.to_string())? = Some(ownership);
 
         let running = RunningGameStatus {
             game_id: Some(profile.id.clone()),
@@ -156,6 +160,9 @@ impl GameLauncher {
             status.state = GameLifecycleState::Idle;
             status.exit_code = exit.code();
             *child_slot = None;
+            if let Ok(mut ownership) = self.ownership.lock() {
+                *ownership = None;
+            }
             set_status(&self.status, status.clone());
             Ok(status)
         } else {
@@ -186,6 +193,9 @@ impl GameLauncher {
                 status.state = GameLifecycleState::Idle;
                 status.exit_code = exit.code();
                 *child_slot = None;
+                if let Ok(mut ownership) = self.ownership.lock() {
+                    *ownership = None;
+                }
                 set_status(&self.status, status);
             }
             Ok(None) => {}
@@ -198,8 +208,30 @@ impl GameLauncher {
 
                 status.state = GameLifecycleState::Error;
                 status.error = Some(error.to_string());
+                status.pid = None;
+                *child_slot = None;
+                if let Ok(mut ownership) = self.ownership.lock() {
+                    *ownership = None;
+                }
                 set_status(&self.status, status);
             }
+        }
+    }
+}
+
+impl Drop for GameLauncher {
+    fn drop(&mut self) {
+        if let Ok(mut child_slot) = self.child.lock() {
+            if let Some(child) = child_slot.as_mut() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+
+            *child_slot = None;
+        }
+
+        if let Ok(mut ownership) = self.ownership.lock() {
+            *ownership = None;
         }
     }
 }

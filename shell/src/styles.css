@@ -4781,6 +4781,28 @@ body {
     pointer-events: auto;
 }
 
+.game-lifecycle-overlay[data-presentation-state="Preparing"],
+.game-lifecycle-overlay[data-presentation-state="Launching"],
+.game-lifecycle-overlay[data-presentation-state="WaitingForReady"],
+.game-lifecycle-overlay[data-presentation-state="Returning"] {
+    background:
+        radial-gradient(
+            circle at 50% 42%,
+            rgba(20, 58, 78, 0.72),
+            rgba(0, 0, 0, 0.96) 62%
+        );
+}
+
+.game-lifecycle-overlay[data-presentation-state="Running"] {
+    background:
+        #000;
+}
+
+.game-lifecycle-overlay[data-presentation-state="Failed"] {
+    background:
+        rgba(0, 0, 0, 0.92);
+}
+
 .game-lifecycle-panel,
 .game-options-panel {
     width:
