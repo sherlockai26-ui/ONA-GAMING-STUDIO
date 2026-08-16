@@ -2616,22 +2616,26 @@ async function launchSelectedGame() {
                 );
 
             showGameLifecycleOverlay(
-                handoff.gameReady
+                handoff.presentationValid && handoff.gameReady
                     ? "GAME READY"
-                    : handoff.legacyFallback
+                    : handoff.presentationValid && handoff.legacyFallback
                         ? "LEGACY HANDOFF"
                         : "DISPLAY NOT READY",
                 game.name,
-                handoff.gameReady
+                handoff.presentationValid && handoff.gameReady
                     ? "Game confirmed ready for console presentation."
-                    : handoff.legacyFallback
+                    : handoff.presentationValid && handoff.legacyFallback
                         ? "Game window is on the ONA Gaming Display without GAME_READY."
-                        : handoff.windowReady
-                            ? "Game window is not on the ONA Gaming Display. ONA will stay visible."
+                        : handoff.rejectionReason
+                            ? `Presentation rejected: ${handoff.rejectionReason}. ONA will stay visible.`
+                            : handoff.windowReady
+                            ? "Game window is not ready for console presentation. ONA will stay visible."
                             : "Game display was not confirmed. ONA will stay visible."
+                ,
+                formatHandoffDiagnostics(handoff)
             );
 
-            if (handoff.gameReady || handoff.legacyFallback) {
+            if (handoff.presentationValid && (handoff.gameReady || handoff.legacyFallback)) {
                 await waitForTransition(
                     handoff.legacyFallback
                         ? 520
@@ -2737,6 +2741,46 @@ async function rollbackFailedLaunch(game) {
     setConsolePresentationState(
         ConsolePresentationState.IDLE
     );
+
+}
+
+
+function formatHandoffDiagnostics(handoff) {
+
+    const diagnostics =
+        handoff?.diagnostics;
+
+    if (!diagnostics) {
+        return "";
+    }
+
+    const expected =
+        diagnostics.expectedBounds
+            ? `${diagnostics.expectedBounds.x},${diagnostics.expectedBounds.y} ${diagnostics.expectedBounds.width}x${diagnostics.expectedBounds.height}`
+            : "unknown";
+    const detected =
+        diagnostics.detectedBounds
+            ? `${diagnostics.detectedBounds.x},${diagnostics.detectedBounds.y} ${diagnostics.detectedBounds.width}x${diagnostics.detectedBounds.height}`
+            : "none";
+    const client =
+        diagnostics.detectedClientBounds
+            ? `${diagnostics.detectedClientBounds.x},${diagnostics.detectedClientBounds.y} ${diagnostics.detectedClientBounds.width}x${diagnostics.detectedClientBounds.height}`
+            : "none";
+    const style =
+        diagnostics.windowStyle
+            ? `${diagnostics.windowStyle.styleHex}/${diagnostics.windowStyle.exStyleHex} caption=${diagnostics.windowStyle.hasCaption} frame=${diagnostics.windowStyle.hasThickFrame || diagnostics.windowStyle.hasDialogFrame}`
+            : "unknown";
+
+    return [
+        `expected=${expected}`,
+        `detected=${detected}`,
+        `client=${client}`,
+        `monitor=${diagnostics.detectedMonitor || "none"}->${diagnostics.expectedMonitor || "unknown"}`,
+        `style=${style}`,
+        `gameReady=${diagnostics.gameReadyReceived}`,
+        `presentationValid=${diagnostics.presentationValid}`,
+        `reason=${diagnostics.rejectionReason || "none"}`
+    ].join(" | ");
 
 }
 

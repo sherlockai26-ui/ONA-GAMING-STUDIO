@@ -261,19 +261,26 @@ fn launch_installed_game(
         "GAMING_DISPLAY_NOT_AVAILABLE: Select another display before launching the game."
             .to_string()
     })?;
-    let manifest_resolution = parse_resolution(&profile.resolution);
-    let display_width = manifest_resolution
-        .map(|resolution| resolution.0)
-        .unwrap_or(target_display.width);
-    let display_height = manifest_resolution
-        .map(|resolution| resolution.1)
-        .unwrap_or(target_display.height);
+    let (display_mode, display_width, display_height) =
+        runtime_display_contract_for_profile(&profile, target_display.width, target_display.height);
 
     runtime
         .lifecycle_bridge
         .lock()
         .map_err(|error| error.to_string())?
         .clear();
+
+    println!(
+        "[ONA Runtime] Display contract for {}: ONA_DISPLAY_MODE={} ONA_DISPLAY_ID={} ONA_DISPLAY_X={} ONA_DISPLAY_Y={} ONA_DISPLAY_WIDTH={} ONA_DISPLAY_HEIGHT={} ONA_DISPLAY_SCALE_FACTOR={}",
+        profile.id,
+        display_mode,
+        target_display.identifier,
+        target_display.x,
+        target_display.y,
+        display_width,
+        display_height,
+        target_display.scale_factor
+    );
 
     runtime.launcher.launch_with_runtime(
         &profile,
@@ -283,11 +290,7 @@ fn launch_installed_game(
             lifecycle_host: lifecycle_status.host,
             lifecycle_port: lifecycle_status.port,
             player_id: None,
-            display_mode: if profile.fullscreen {
-                "CONSOLE_FULLSCREEN".to_string()
-            } else {
-                "WINDOWED".to_string()
-            },
+            display_mode,
             display_id: target_display.identifier.clone(),
             display_name: target_display.name.clone(),
             display_x: target_display.x,
@@ -305,6 +308,25 @@ fn parse_resolution(resolution: &Option<String>) -> Option<(u32, u32)> {
     let (width, height) = resolution.split_once('x')?;
 
     Some((width.trim().parse().ok()?, height.trim().parse().ok()?))
+}
+
+fn runtime_display_contract_for_profile(
+    profile: &GameProfile,
+    target_width: u32,
+    target_height: u32,
+) -> (String, u32, u32) {
+    if profile.fullscreen {
+        return (
+            "CONSOLE_FULLSCREEN".to_string(),
+            target_width,
+            target_height,
+        );
+    }
+
+    let (display_width, display_height) =
+        parse_resolution(&profile.resolution).unwrap_or((target_width, target_height));
+
+    ("WINDOWED".to_string(), display_width, display_height)
 }
 
 #[tauri::command]
@@ -328,12 +350,22 @@ async fn wait_for_game_handoff_ready(
         "GAMING_DISPLAY_NOT_AVAILABLE: Select another display before launching the game."
             .to_string()
     })?;
+    let launcher_status = runtime.launcher.status();
+    let profile = launcher_status
+        .game_id
+        .as_deref()
+        .and_then(|game_id| game_library(&app_handle).ok()?.get_game(game_id).ok());
+    let presentation_mode = profile
+        .as_ref()
+        .map(|profile| runtime_display_contract_for_profile(profile, target.width, target.height).0)
+        .unwrap_or_else(|| "CONSOLE_FULLSCREEN".to_string());
     let target = game_handoff::TargetDisplayBounds {
         display_id: target.identifier.clone(),
         x: target.x,
         y: target.y,
         width: target.width,
         height: target.height,
+        presentation_mode,
     };
     let lifecycle_bridge = runtime
         .lifecycle_bridge
