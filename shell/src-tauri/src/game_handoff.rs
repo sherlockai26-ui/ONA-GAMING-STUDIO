@@ -25,6 +25,7 @@ pub struct GameHandoffStatus {
     pub game_ready: bool,
     pub handshake_confirmed: bool,
     pub legacy_fallback: bool,
+    pub ona_compatible: bool,
     pub presentation_valid: bool,
     pub rejection_reason: Option<String>,
     pub diagnostics: Option<GameHandoffDiagnostics>,
@@ -42,6 +43,7 @@ pub struct GameHandoffDiagnostics {
     pub detected_monitor: Option<String>,
     pub window_style: Option<WindowStyleSnapshot>,
     pub game_ready_received: bool,
+    pub ona_compatible: bool,
     pub presentation_valid: bool,
     pub rejection_reason: Option<String>,
 }
@@ -70,6 +72,7 @@ pub fn wait_for_game_handoff_ready(
     pid: u32,
     target: TargetDisplayBounds,
     timeout_ms: u64,
+    mut has_ona_lifecycle: impl FnMut() -> bool,
     mut handshake_display_ready: impl FnMut() -> bool,
     mut handshake_game_ready: impl FnMut() -> bool,
 ) -> GameHandoffStatus {
@@ -79,16 +82,24 @@ pub fn wait_for_game_handoff_ready(
     let mut window_on_target_display = false;
     let mut handshake_confirmed = false;
     let mut game_ready = false;
+    let mut ona_compatible = false;
+    let mut last_presentation_valid = false;
     let mut foreground_attempted = false;
     let mut foreground_granted = false;
-    let mut last_diagnostics = handoff_diagnostics(&target, None, game_ready);
+    let mut last_diagnostics = handoff_diagnostics(&target, None, game_ready, ona_compatible);
 
     while started.elapsed() < timeout {
+        if has_ona_lifecycle() {
+            ona_compatible = true;
+        }
+
         if handshake_display_ready() {
+            ona_compatible = true;
             handshake_confirmed = true;
         }
 
         if handshake_game_ready() {
+            ona_compatible = true;
             handshake_confirmed = true;
             game_ready = true;
         }
@@ -97,7 +108,9 @@ pub fn wait_for_game_handoff_ready(
             window_ready = true;
             window_on_target_display = window_is_on_target_display(&window, &target);
             let presentation = validate_window_presentation(&window, &target);
-            last_diagnostics = handoff_diagnostics(&target, Some(&presentation), game_ready);
+            last_presentation_valid = presentation.valid;
+            last_diagnostics =
+                handoff_diagnostics(&target, Some(&presentation), game_ready, ona_compatible);
 
             if window_on_target_display && !foreground_attempted {
                 foreground_attempted = true;
@@ -113,23 +126,7 @@ pub fn wait_for_game_handoff_ready(
                     game_ready,
                     handshake_confirmed,
                     legacy_fallback: false,
-                    presentation_valid: true,
-                    rejection_reason: None,
-                    diagnostics: Some(last_diagnostics),
-                    foreground_attempted,
-                    foreground_granted,
-                };
-            }
-
-            if presentation.valid && !handshake_confirmed {
-                return GameHandoffStatus {
-                    process_ready: true,
-                    window_ready,
-                    window_on_target_display,
-                    display_ready: false,
-                    game_ready: false,
-                    handshake_confirmed: false,
-                    legacy_fallback: true,
+                    ona_compatible,
                     presentation_valid: true,
                     rejection_reason: None,
                     diagnostics: Some(last_diagnostics),
@@ -142,6 +139,30 @@ pub fn wait_for_game_handoff_ready(
         thread::sleep(POLL_INTERVAL);
     }
 
+    if should_return_legacy_fallback(last_presentation_valid, ona_compatible) {
+        return GameHandoffStatus {
+            process_ready: true,
+            window_ready,
+            window_on_target_display,
+            display_ready: false,
+            game_ready: false,
+            handshake_confirmed: false,
+            legacy_fallback: true,
+            ona_compatible: false,
+            presentation_valid: true,
+            rejection_reason: None,
+            diagnostics: Some(last_diagnostics),
+            foreground_attempted,
+            foreground_granted,
+        };
+    }
+
+    if ona_compatible && !game_ready {
+        last_diagnostics.rejection_reason =
+            Some("ONA_COMPATIBLE_GAME_READY_NOT_RECEIVED".to_string());
+        last_diagnostics.presentation_valid = last_presentation_valid;
+    }
+
     GameHandoffStatus {
         process_ready: true,
         window_ready,
@@ -150,12 +171,21 @@ pub fn wait_for_game_handoff_ready(
         game_ready,
         handshake_confirmed,
         legacy_fallback: false,
-        presentation_valid: false,
-        rejection_reason: last_diagnostics.rejection_reason.clone(),
+        ona_compatible,
+        presentation_valid: last_presentation_valid,
+        rejection_reason: if ona_compatible && !game_ready {
+            Some("ONA_COMPATIBLE_GAME_READY_NOT_RECEIVED".to_string())
+        } else {
+            last_diagnostics.rejection_reason.clone()
+        },
         diagnostics: Some(last_diagnostics),
         foreground_attempted,
         foreground_granted,
     }
+}
+
+fn should_return_legacy_fallback(presentation_valid: bool, ona_compatible: bool) -> bool {
+    presentation_valid && !ona_compatible
 }
 
 fn window_is_on_target_display(window: &WindowBounds, target: &TargetDisplayBounds) -> bool {
@@ -236,6 +266,7 @@ fn handoff_diagnostics(
     target: &TargetDisplayBounds,
     validation: Option<&WindowPresentationValidation>,
     game_ready: bool,
+    ona_compatible: bool,
 ) -> GameHandoffDiagnostics {
     let expected_bounds = BoundsSnapshot {
         x: target.x,
@@ -253,6 +284,7 @@ fn handoff_diagnostics(
             detected_monitor: validation.detected_monitor.clone(),
             window_style: validation.window_style.clone(),
             game_ready_received: game_ready,
+            ona_compatible,
             presentation_valid: validation.valid,
             rejection_reason: validation.rejection_reason.clone(),
         };
@@ -266,6 +298,7 @@ fn handoff_diagnostics(
         detected_monitor: None,
         window_style: None,
         game_ready_received: game_ready,
+        ona_compatible,
         presentation_valid: false,
         rejection_reason: Some("GAME_WINDOW_NOT_FOUND".to_string()),
     }
@@ -472,6 +505,7 @@ fn platform_visible_window_for_pid(_pid: u32) -> Option<WindowBounds> {
 
 #[cfg(test)]
 mod tests {
+    use super::should_return_legacy_fallback;
     use super::{bounds_cover_target, BoundsSnapshot};
 
     #[test]
@@ -508,5 +542,15 @@ mod tests {
         };
 
         assert!(!bounds_cover_target(&detected, &expected));
+    }
+
+    #[test]
+    fn ona_compatible_game_without_game_ready_cannot_use_legacy_fallback() {
+        assert!(!should_return_legacy_fallback(true, true));
+    }
+
+    #[test]
+    fn legacy_exe_without_lifecycle_can_use_legacy_fallback_after_timeout() {
+        assert!(should_return_legacy_fallback(true, false));
     }
 }

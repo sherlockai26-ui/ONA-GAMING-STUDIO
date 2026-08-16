@@ -79,9 +79,15 @@ impl GameLifecycleBridge {
                             let reader = BufReader::new(stream);
                             for line in reader.lines().map_while(Result::ok) {
                                 if let Some(signal) = parse_runtime_signal(&line) {
+                                    println!("[ONA Runtime Bridge] Signal received: {signal:?}");
                                     if let Ok(mut signals) = signals.lock() {
                                         signals.push(signal);
                                     }
+                                } else {
+                                    println!(
+                                        "[ONA Runtime Bridge] Ignored runtime line: {}",
+                                        line.trim()
+                                    );
                                 }
                             }
                         });
@@ -105,6 +111,13 @@ impl GameLifecycleBridge {
         self.signals
             .lock()
             .map(|signals| signals.contains(&signal))
+            .unwrap_or(false)
+    }
+
+    pub fn has_any_signal(&self) -> bool {
+        self.signals
+            .lock()
+            .map(|signals| !signals.is_empty())
             .unwrap_or(false)
     }
 

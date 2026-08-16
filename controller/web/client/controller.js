@@ -1,25 +1,16 @@
 // ============================================
 // ONA CONTROLLER
-// GLOBAL MULTI-TOUCH INPUT ENGINE v3
+// POINTER-ID MULTI-TOUCH INPUT ENGINE v4
 // ============================================
 
 console.log("=================================");
 console.log("ONA CONTROLLER");
-console.log("MULTI-TOUCH ENGINE v3");
+console.log("POINTER MULTI-TOUCH ENGINE v4");
 console.log("=================================");
-
-
-// ============================================
-// ELEMENTOS
-// ============================================
 
 const controller = document.getElementById("controller");
 const zone = document.getElementById("joystick-zone");
 const joystick = document.getElementById("joystick");
-
-const buttons = [
-    ...document.querySelectorAll("[data-button]")
-];
 
 [
     [".shoulder.l1", "L1"],
@@ -33,14 +24,11 @@ const buttons = [
 
     if (button) {
         button.dataset.button = name;
-        buttons.push(button);
     }
 });
 
-
-// ============================================
-// ONA CORE WEBSOCKET
-// ============================================
+const buttons =
+    [...new Set(document.querySelectorAll("[data-button]"))];
 
 const pairingParams = new URLSearchParams(window.location.search);
 const sessionId = pairingParams.get("id");
@@ -92,82 +80,40 @@ controllerSocket.addEventListener(
     (event) => console.warn("[ONA CONTROLLER] WebSocket close:", event.code, event.reason)
 );
 
-
-// ============================================
-// ESTADO MULTI-TOUCH
-// ============================================
-//
-// Cada dedo es completamente independiente.
-//
-// dedo 1 -> joystick
-// dedo 2 -> A
-// dedo 3 -> B
-// dedo 4 -> X
-//
-// ============================================
-
-const activeTouches = new Map();
-
-
-// ============================================
-// ESTADO DEL JOYSTICK
-// ============================================
-
-let joystickTouchId = null;
-
-
-// ============================================
-// ESTADO DE BOTONES
-// ============================================
-
-const pressedButtons = new Map();
-
-
-// ============================================
-// PROTECCIÓN CONTRA ZOOM / GESTOS
-// ============================================
+const activePointers = new Map();
+const activeButtonCounts = new Map();
+let joystickPointerId = null;
 
 document.addEventListener(
     "gesturestart",
-    (event) => {
-        event.preventDefault();
-    },
-    {
-        passive: false
-    }
+    (event) => event.preventDefault(),
+    { passive: false }
 );
 
 document.addEventListener(
     "gesturechange",
-    (event) => {
-        event.preventDefault();
-    },
-    {
-        passive: false
-    }
+    (event) => event.preventDefault(),
+    { passive: false }
 );
 
 document.addEventListener(
     "gestureend",
-    (event) => {
-        event.preventDefault();
-    },
-    {
-        passive: false
-    }
+    (event) => event.preventDefault(),
+    { passive: false }
 );
 
+document.addEventListener(
+    "contextmenu",
+    (event) => event.preventDefault()
+);
 
-// ============================================
-// UTILIDAD
-// DETECTAR SI UN PUNTO ESTÁ DENTRO
-// DE UN ELEMENTO
-// ============================================
+document.addEventListener(
+    "selectstart",
+    (event) => event.preventDefault()
+);
 
 function pointInsideElement(x, y, element) {
-
-    const rect =
-        element.getBoundingClientRect();
+    const rect = element.getBoundingClientRect();
 
     return (
         x >= rect.left &&
@@ -177,108 +123,42 @@ function pointInsideElement(x, y, element) {
     );
 }
 
-
-// ============================================
-// BUSCAR BOTÓN
-// ============================================
-
 function getButtonAt(x, y) {
+    const element =
+        document.elementFromPoint(x, y);
 
-    for (const button of buttons) {
+    const directButton =
+        element?.closest?.("[data-button]");
 
-        if (
-            pointInsideElement(
-                x,
-                y,
-                button
-            )
-        ) {
-
-            return button;
-
-        }
-
+    if (directButton && buttons.includes(directButton)) {
+        return directButton;
     }
 
-    return null;
+    return buttons.find((button) => pointInsideElement(x, y, button)) || null;
 }
 
-
-// ============================================
-// ACTUALIZAR JOYSTICK
-// ============================================
-
 function updateJoystick(clientX, clientY) {
+    const rect = zone.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    let x = clientX - centerX;
+    let y = clientY - centerY;
+    const maxDistance = rect.width * 0.27;
+    const distance = Math.sqrt(x * x + y * y);
 
-    const rect =
-        zone.getBoundingClientRect();
-
-
-    const centerX =
-        rect.left +
-        rect.width / 2;
-
-
-    const centerY =
-        rect.top +
-        rect.height / 2;
-
-
-    let x =
-        clientX -
-        centerX;
-
-
-    let y =
-        clientY -
-        centerY;
-
-
-    const maxDistance =
-        rect.width * 0.27;
-
-
-    const distance =
-        Math.sqrt(
-            x * x +
-            y * y
-        );
-
-
-    if (
-        distance > maxDistance &&
-        distance !== 0
-    ) {
-
-        x =
-            (x / distance) *
-            maxDistance;
-
-
-        y =
-            (y / distance) *
-            maxDistance;
-
+    if (distance > maxDistance && distance !== 0) {
+        x = (x / distance) * maxDistance;
+        y = (y / distance) * maxDistance;
     }
 
-
-    const normalizedX =
-        x / maxDistance;
-
-
-    const normalizedY =
-        y / maxDistance;
-
+    const normalizedX = x / maxDistance;
+    const normalizedY = y / maxDistance;
 
     joystick.style.transform =
-        `translate(
-            calc(-50% + ${x}px),
-            calc(-50% + ${y}px)
-        )`;
-
+        `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
 
     console.log(
-        "JOYSTICK:",
+        "[ONA Controller] INPUT SENT joystick",
         normalizedX.toFixed(2),
         normalizedY.toFixed(2)
     );
@@ -289,534 +169,215 @@ function updateJoystick(clientX, clientY) {
         x: normalizedX,
         y: normalizedY
     });
-
 }
-
-
-// ============================================
-// RESET JOYSTICK
-// ============================================
 
 function resetJoystick() {
+    joystickPointerId = null;
+    joystick.style.transform = "translate(-50%, -50%)";
 
-    joystickTouchId = null;
+    console.log("[ONA Controller] INPUT SENT joystick 0.00 0.00");
 
-    joystick.style.transform =
-        "translate(-50%, -50%)";
-
-    console.log(
-        "JOYSTICK RESET"
-    );
-
-    sendControllerMessage({ type: "input", control: "JOYSTICK", x: 0, y: 0 });
+    sendControllerMessage({
+        type: "input",
+        control: "JOYSTICK",
+        x: 0,
+        y: 0
+    });
 }
 
+function pressButton(button, pointerId) {
+    const name = button.dataset.button;
+    const count = activeButtonCounts.get(name) || 0;
 
-// ============================================
-// PRESIONAR BOTÓN
-// ============================================
+    activeButtonCounts.set(name, count + 1);
+    button.classList.add("virtual-pressed");
 
-function pressButton(button, touchId) {
-
-    const name =
-        button.dataset.button;
-
-
-    // Guardamos qué dedo pertenece
-    // a qué botón.
-
-    pressedButtons.set(
-        touchId,
-        {
-            button: button,
-            name: name
-        }
-    );
-
-
-    button.classList.add(
-        "virtual-pressed"
-    );
-
-
-    console.log(
-        "BUTTON DOWN:",
-        name,
-        "TOUCH:",
-        touchId
-    );
-
-    sendControllerMessage({ type: "input", button: name, state: "down" });
+    if (count === 0) {
+        console.log("[ONA Controller] INPUT SENT", name, "down", "pointerId=", pointerId);
+        sendControllerMessage({ type: "input", button: name, state: "down" });
+    }
 }
 
+function releaseButton(button, pointerId) {
+    const name = button.dataset.button;
+    const count = activeButtonCounts.get(name) || 0;
 
-// ============================================
-// SOLTAR BOTÓN
-// ============================================
-
-function releaseButton(touchId) {
-
-    const state =
-        pressedButtons.get(
-            touchId
-        );
-
-
-    if (!state) {
+    if (count <= 1) {
+        activeButtonCounts.delete(name);
+        button.classList.remove("virtual-pressed");
+        console.log("[ONA Controller] INPUT SENT", name, "up", "pointerId=", pointerId);
+        sendControllerMessage({ type: "input", button: name, state: "up" });
         return;
     }
 
-
-    state.button.classList.remove(
-        "virtual-pressed"
-    );
-
-
-    console.log(
-        "BUTTON UP:",
-        state.name,
-        "TOUCH:",
-        touchId
-    );
-
-    sendControllerMessage({ type: "input", button: state.name, state: "up" });
-
-
-    pressedButtons.delete(
-        touchId
-    );
+    activeButtonCounts.set(name, count - 1);
 }
 
+function capturePointer(element, pointerId) {
+    try {
+        element.setPointerCapture(pointerId);
+    }
+    catch (error) {
+        console.warn("[ONA Controller] setPointerCapture failed:", pointerId, error);
+    }
+}
 
-// ============================================
-// ASIGNAR TOUCH
-// ============================================
+function releasePointer(element, pointerId) {
+    try {
+        if (element.hasPointerCapture?.(pointerId)) {
+            element.releasePointerCapture(pointerId);
+        }
+    }
+    catch (error) {
+        console.warn("[ONA Controller] releasePointerCapture failed:", pointerId, error);
+    }
+}
 
-function assignTouch(touch) {
-
-    const id =
-        touch.identifier;
-
-
-    const x =
-        touch.clientX;
-
-
-    const y =
-        touch.clientY;
-
+function assignPointer(event) {
+    const pointerId = event.pointerId;
+    const x = event.clientX;
+    const y = event.clientY;
 
     console.log(
-        "TOUCH START:",
-        id,
-        x,
-        y
+        "[ONA Controller] POINTER DOWN",
+        "pointerId=",
+        pointerId,
+        "isPrimary=",
+        event.isPrimary,
+        "x=",
+        Math.round(x),
+        "y=",
+        Math.round(y)
     );
-
-
-    // ========================================
-    // JOYSTICK
-    // ========================================
 
     if (
-        joystickTouchId === null &&
-        pointInsideElement(
-            x,
-            y,
-            zone
-        )
+        joystickPointerId === null &&
+        pointInsideElement(x, y, zone)
     ) {
-
-        joystickTouchId =
-            id;
-
-
-        activeTouches.set(
-            id,
-            {
-                type: "joystick"
-            }
-        );
-
-
-        updateJoystick(
-            x,
-            y
-        );
-
-
-        console.log(
-            "ASSIGNED:",
-            id,
-            "-> JOYSTICK"
-        );
-
-
+        joystickPointerId = pointerId;
+        activePointers.set(pointerId, {
+            type: "joystick",
+            element: zone
+        });
+        capturePointer(zone, pointerId);
+        updateJoystick(x, y);
+        console.log("[ONA Controller] POINTER ASSIGNED", pointerId, "JOYSTICK");
         return;
     }
 
-
-    // ========================================
-    // BOTÓN
-    // ========================================
-
-    const button =
-        getButtonAt(
-            x,
-            y
-        );
-
+    const button = getButtonAt(x, y);
 
     if (button) {
-
-        activeTouches.set(
-            id,
-            {
-                type: "button",
-                button: button
-            }
-        );
-
-
-        pressButton(
-            button,
-            id
-        );
-
-
-        console.log(
-            "ASSIGNED:",
-            id,
-            "-> BUTTON",
-            button.dataset.button
-        );
-
-
+        activePointers.set(pointerId, {
+            type: "button",
+            element: button
+        });
+        capturePointer(button, pointerId);
+        pressButton(button, pointerId);
+        console.log("[ONA Controller] POINTER ASSIGNED", pointerId, button.dataset.button);
         return;
     }
 
-
-    // ========================================
-    // TOQUE SIN FUNCIÓN
-    // ========================================
-
-    activeTouches.set(
-        id,
-        {
-            type: "none"
-        }
-    );
-
-
-    console.log(
-        "ASSIGNED:",
-        id,
-        "-> NONE"
-    );
+    activePointers.set(pointerId, {
+        type: "none",
+        element: controller
+    });
+    capturePointer(controller, pointerId);
+    console.log("[ONA Controller] POINTER ASSIGNED", pointerId, "NONE");
 }
 
+function movePointer(event) {
+    const state = activePointers.get(event.pointerId);
 
-// ============================================
-// LIBERAR TOUCH
-// ============================================
+    if (!state || state.type !== "joystick") {
+        return;
+    }
 
-function releaseTouch(touch) {
+    updateJoystick(event.clientX, event.clientY);
+}
 
-    const id =
-        touch.identifier;
+function releaseActivePointer(event, cancelled = false) {
+    const pointerId = event.pointerId;
+    const state = activePointers.get(pointerId);
 
-
-    const state =
-        activeTouches.get(
-            id
-        );
-
+    console.log(
+        cancelled
+            ? "[ONA Controller] POINTER CANCEL"
+            : "[ONA Controller] POINTER UP",
+        "pointerId=",
+        pointerId
+    );
 
     if (!state) {
         return;
     }
 
-
-    // ========================================
-    // JOYSTICK
-    // ========================================
-
-    if (
-        state.type ===
-        "joystick"
-    ) {
-
-        if (
-            joystickTouchId === id
-        ) {
-
-            resetJoystick();
-
-        }
-
+    if (state.type === "joystick" && joystickPointerId === pointerId) {
+        resetJoystick();
     }
 
-
-    // ========================================
-    // BOTÓN
-    // ========================================
-
-    if (
-        state.type ===
-        "button"
-    ) {
-
-        releaseButton(
-            id
-        );
-
+    if (state.type === "button") {
+        releaseButton(state.element, pointerId);
     }
 
-
-    // ========================================
-    // ELIMINAR DEDO
-    // ========================================
-
-    activeTouches.delete(
-        id
-    );
-
-
-    console.log(
-        "TOUCH RELEASE:",
-        id
-    );
+    releasePointer(state.element, pointerId);
+    activePointers.delete(pointerId);
 }
 
-
-// ============================================
-// TOUCH START
-// ============================================
-//
-// IMPORTANTE:
-//
-// Cada nuevo dedo se procesa
-// independientemente.
-//
-// ============================================
-
-document.addEventListener(
-    "touchstart",
+controller.addEventListener(
+    "pointerdown",
     (event) => {
-
         event.preventDefault();
-
-
-        for (
-            const touch
-            of event.changedTouches
-        ) {
-
-            assignTouch(
-                touch
-            );
-
-        }
-
-
-        console.log(
-            "ACTIVE FINGERS:",
-            event.touches.length
-        );
-
+        assignPointer(event);
     },
-    {
-        passive: false,
-        capture: true
-    }
+    { passive: false }
 );
 
-
-// ============================================
-// TOUCH MOVE
-// ============================================
-
-document.addEventListener(
-    "touchmove",
+controller.addEventListener(
+    "pointermove",
     (event) => {
-
         event.preventDefault();
+        movePointer(event);
+    },
+    { passive: false }
+);
 
+controller.addEventListener(
+    "pointerup",
+    (event) => {
+        event.preventDefault();
+        releaseActivePointer(event);
+    },
+    { passive: false }
+);
 
-        for (
-            const touch
-            of event.changedTouches
-        ) {
+controller.addEventListener(
+    "pointercancel",
+    (event) => {
+        event.preventDefault();
+        releaseActivePointer(event, true);
+    },
+    { passive: false }
+);
 
-            const id =
-                touch.identifier;
+window.addEventListener(
+    "blur",
+    () => {
+        for (const pointerId of [...activePointers.keys()]) {
+            const state = activePointers.get(pointerId);
 
-
-            const state =
-                activeTouches.get(
-                    id
-                );
-
-
-            if (!state) {
-                continue;
+            if (state?.type === "joystick") {
+                resetJoystick();
             }
 
-
-            // =================================
-            // JOYSTICK
-            // =================================
-
-            if (
-                state.type ===
-                "joystick"
-            ) {
-
-                updateJoystick(
-                    touch.clientX,
-                    touch.clientY
-                );
-
+            if (state?.type === "button") {
+                releaseButton(state.element, pointerId);
             }
 
-
-            // =================================
-            // BOTÓN
-            // =================================
-            //
-            // El botón mantiene su estado.
-            //
-            // Aunque el dedo se mueva,
-            // sigue perteneciendo al botón
-            // original.
-            //
-
-            if (
-                state.type ===
-                "button"
-            ) {
-
-                continue;
-
-            }
-
+            activePointers.delete(pointerId);
         }
-
-    },
-    {
-        passive: false,
-        capture: true
     }
 );
 
-
-// ============================================
-// TOUCH END
-// ============================================
-
-document.addEventListener(
-    "touchend",
-    (event) => {
-
-        event.preventDefault();
-
-
-        for (
-            const touch
-            of event.changedTouches
-        ) {
-
-            releaseTouch(
-                touch
-            );
-
-        }
-
-
-        console.log(
-            "ACTIVE FINGERS:",
-            event.touches.length
-        );
-
-    },
-    {
-        passive: false,
-        capture: true
-    }
-);
-
-
-// ============================================
-// TOUCH CANCEL
-// ============================================
-
-document.addEventListener(
-    "touchcancel",
-    (event) => {
-
-        event.preventDefault();
-
-
-        for (
-            const touch
-            of event.changedTouches
-        ) {
-
-            releaseTouch(
-                touch
-            );
-
-        }
-
-
-        console.log(
-            "TOUCH CANCEL"
-        );
-
-    },
-    {
-        passive: false,
-        capture: true
-    }
-);
-
-
-// ============================================
-// EVITAR MENÚ CONTEXTUAL
-// ============================================
-
-document.addEventListener(
-    "contextmenu",
-    (event) => {
-
-        event.preventDefault();
-
-    }
-);
-
-
-// ============================================
-// BLOQUEAR SELECCIÓN
-// ============================================
-
-document.addEventListener(
-    "selectstart",
-    (event) => {
-
-        event.preventDefault();
-
-    }
-);
-
-
-// ============================================
-// DIAGNÓSTICO
-// ============================================
-
-console.log(
-    "ONA GLOBAL MULTITOUCH READY"
-);
-
-console.log(
-    "Joystick + Buttons independent"
-);
+console.log("ONA POINTER MULTITOUCH READY");
+console.log("Joystick + buttons independent by pointerId");

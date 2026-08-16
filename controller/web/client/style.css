@@ -41,14 +41,7 @@ body {
         Helvetica,
         sans-serif;
 
-    /*
-     * IMPORTANTE:
-     * El documento completo ya no utiliza touch-action:none.
-     * Esto permite que el navegador trate toda la interfaz
-     * como una superficie interactiva sin aplicar gestos
-     * innecesarios.
-     */
-    touch-action: manipulation;
+    touch-action: none;
 
     overscroll-behavior: none;
 }
@@ -97,10 +90,7 @@ body {
         max(10px, env(safe-area-inset-bottom))
         max(14px, env(safe-area-inset-left));
 
-    /*
-     * Zona general del controlador.
-     */
-    touch-action: manipulation;
+    touch-action: none;
 
     background:
         radial-gradient(
@@ -141,7 +131,7 @@ body {
     /*
      * Igual que los botones.
      */
-    touch-action: manipulation;
+    touch-action: none;
 }
 
 
@@ -210,7 +200,7 @@ body {
      * Los botones ya demostraron que esta configuración
      * evita el problema del zoom.
      */
-    touch-action: manipulation;
+    touch-action: none;
 
     position: relative;
 
@@ -243,7 +233,7 @@ body {
 
     z-index: 3;
 
-    touch-action: manipulation;
+    touch-action: none;
 }
 
 
@@ -264,7 +254,7 @@ body {
 
     letter-spacing: 0.5px;
 
-    touch-action: manipulation;
+    touch-action: none;
 }
 
 
@@ -282,11 +272,7 @@ body {
 
     z-index: 2;
 
-    /*
-     * El contenedor ya NO bloquea los gestos.
-     * Solamente el área real del joystick los controla.
-     */
-    touch-action: manipulation;
+    touch-action: none;
 }
 
 
@@ -410,10 +396,7 @@ body {
 
     z-index: 2;
 
-    /*
-     * Igual que los botones.
-     */
-    touch-action: manipulation;
+    touch-action: none;
 }
 
 
@@ -457,7 +440,7 @@ body {
         transform 0.08s,
         box-shadow 0.08s;
 
-    touch-action: manipulation;
+    touch-action: none;
 
     z-index: 3;
 }
@@ -504,8 +487,11 @@ body {
    ========================= */
 
 .action-button:active,
+.action-button.virtual-pressed,
 .shoulder:active,
-.system-button:active {
+.shoulder.virtual-pressed,
+.system-button:active,
+.system-button.virtual-pressed {
     transform: scale(0.92);
 
     filter: brightness(1.35);
@@ -513,7 +499,9 @@ body {
 
 
 .button-y:active,
-.button-a:active {
+.button-y.virtual-pressed,
+.button-a:active,
+.button-a.virtual-pressed {
     transform:
         translateX(-50%)
         scale(0.92);

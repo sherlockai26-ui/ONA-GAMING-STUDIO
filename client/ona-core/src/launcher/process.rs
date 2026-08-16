@@ -114,6 +114,10 @@ impl GameLauncher {
 
         let ownership = ProcessOwnership::attach(&child);
         let pid = child.id();
+        println!(
+            "[ONA Launcher] Native game process started game_id={} pid={}",
+            profile.id, pid
+        );
         *self.child.lock().map_err(|error| error.to_string())? = Some(child);
         *self.ownership.lock().map_err(|error| error.to_string())? = Some(ownership);
 
@@ -148,8 +152,16 @@ impl GameLauncher {
 
         let mut child_slot = self.child.lock().map_err(|error| error.to_string())?;
         if let Some(child) = child_slot.as_mut() {
+            println!(
+                "[ONA Launcher] Killing native game process pid={}",
+                child.id()
+            );
             child.kill().map_err(|error| error.to_string())?;
             let exit = child.wait().map_err(|error| error.to_string())?;
+            println!(
+                "[ONA Launcher] Native game process killed exit_code={:?}",
+                exit.code()
+            );
             let mut status = self
                 .status
                 .lock()
@@ -183,6 +195,10 @@ impl GameLauncher {
 
         match child.try_wait() {
             Ok(Some(exit)) => {
+                println!(
+                    "[ONA Launcher] Native game process exited exit_code={:?}",
+                    exit.code()
+                );
                 let mut status = self
                     .status
                     .lock()

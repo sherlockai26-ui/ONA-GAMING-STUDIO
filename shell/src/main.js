@@ -191,6 +191,9 @@ const gameOptionsStatus =
 const gameOptionsDetails =
     document.getElementById("game-options-details");
 
+const gameOptionsActions =
+    document.getElementById("game-options-actions");
+
 const controllersStatus =
     document.getElementById("controllers-status");
 
@@ -394,6 +397,9 @@ let gameOptionsOpen =
 let gameOptionsMode =
     "menu";
 
+let selectedGameOptionIndex =
+    0;
+
 let selectedOptionsGame =
     null;
 
@@ -407,6 +413,15 @@ let uiOperationState =
     "idle";
 
 let onaExitConfirmOpen =
+    false;
+
+const START_HOLD_THRESHOLD_MS =
+    1000;
+
+let startHoldTimer =
+    null;
+
+let startHoldConsumed =
     false;
 
 let addingController =
@@ -428,6 +443,17 @@ const ONA_CONTROLLER_BUTTONS = [
 function uiBusy() {
 
     return uiOperationState !== "idle";
+
+}
+
+
+function nativeGameSessionActive() {
+
+    return (
+        uiOperationState === "running" ||
+        currentState === ONA_STATE.GAME_RUNNING ||
+        Boolean(runningGameId)
+    );
 
 }
 
@@ -1784,6 +1810,73 @@ function activateSelectedSystemMenuItem() {
 }
 
 
+function handleStartButtonState(state) {
+
+    if (currentState === ONA_STATE.QUICK_MENU) {
+        return true;
+    }
+
+    if (state === "down" || state === "pressed") {
+        if (startHoldTimer) {
+            return true;
+        }
+
+        startHoldConsumed =
+            false;
+
+        startHoldTimer =
+            setTimeout(
+                () => {
+                    startHoldTimer =
+                        null;
+                    startHoldConsumed =
+                        true;
+
+                    if (nativeGameSessionActive()) {
+                        openSystemMenuDuringGame();
+                    }
+                },
+                START_HOLD_THRESHOLD_MS
+            );
+
+        return true;
+    }
+
+    if (state === "up" || state === "released") {
+        if (startHoldTimer) {
+            clearTimeout(startHoldTimer);
+            startHoldTimer =
+                null;
+        }
+
+        if (startHoldConsumed) {
+            startHoldConsumed =
+                false;
+            return true;
+        }
+
+        if (nativeGameSessionActive()) {
+            console.log(
+                "[ONA Input] START short during game left to native game."
+            );
+            return true;
+        }
+
+        if (
+            currentState !== ONA_STATE.WAITING_CONTROLLER &&
+            !uiBusy()
+        ) {
+            openSystemMenu();
+        }
+
+        return true;
+    }
+
+    return false;
+
+}
+
+
 function directionFromJoystick(x, y) {
 
     const absX =
@@ -1858,6 +1951,11 @@ function moveUiSelection(direction) {
 
     if (importBrowserOpen) {
         navigateInstallPackages(step);
+        return;
+    }
+
+    if (gameOptionsOpen) {
+        navigateGameOptions(step);
         return;
     }
 
@@ -2668,6 +2766,23 @@ async function launchSelectedGame() {
         "Preparing console presentation."
     );
 
+    console.log(
+        "[ONA Presentation] State=PREPARING game=",
+        game
+    );
+
+    try {
+        await invoke(
+            "hide_game_cursor"
+        );
+    }
+    catch (error) {
+        console.warn(
+            "[ONA Cursor] Could not hide cursor:",
+            error
+        );
+    }
+
     await waitForTransition();
 
     if (libraryStatus) {
@@ -2700,6 +2815,10 @@ async function launchSelectedGame() {
             "[ONA Launcher]",
             status
         );
+        console.log(
+            "[ONA Presentation] LAUNCH PID:",
+            status.pid || "none"
+        );
 
         runningGameId =
             game.id;
@@ -2720,6 +2839,9 @@ async function launchSelectedGame() {
                 "LAUNCHING",
                 game.name,
                 "Waiting for game readiness."
+            );
+            console.log(
+                "[ONA Presentation] State=WAITING_FOR_READY timeoutMs=5000"
             );
 
             const handoff =
@@ -2748,9 +2870,13 @@ async function launchSelectedGame() {
                             ? `Presentation rejected: ${handoff.rejectionReason}. ONA will stay visible.`
                             : handoff.windowReady
                             ? "Game window is not ready for console presentation. ONA will stay visible."
-                            : "Game display was not confirmed. ONA will stay visible."
+                        : "Game display was not confirmed. ONA will stay visible."
                 ,
                 formatHandoffDiagnostics(handoff)
+            );
+            console.log(
+                "[ONA Presentation] Handoff result:",
+                handoff
             );
 
             if (handoff.presentationValid && (handoff.gameReady || handoff.legacyFallback)) {
@@ -2765,6 +2891,8 @@ async function launchSelectedGame() {
                 );
 
                 setUiOperation("running");
+                currentState =
+                    ONA_STATE.GAME_RUNNING;
                 setConsolePresentationState(
                     ConsolePresentationState.RUNNING
                 );
@@ -2775,7 +2903,11 @@ async function launchSelectedGame() {
                 setConsolePresentationState(
                     ConsolePresentationState.FAILED
                 );
-                await rollbackFailedLaunch(game);
+                await rollbackFailedLaunch(
+                    game,
+                    "HANDOFF_NOT_SAFE",
+                    handoff
+                );
             }
         }
         else {
@@ -2818,7 +2950,15 @@ async function launchSelectedGame() {
 }
 
 
-async function rollbackFailedLaunch(game) {
+async function rollbackFailedLaunch(game, reason = "LAUNCH_FAILED", diagnostics = null) {
+
+    console.warn(
+        "[ONA Presentation] Rolling back launch:",
+        {
+            reason,
+            diagnostics
+        }
+    );
 
     try {
         await invoke(
@@ -2854,7 +2994,24 @@ async function rollbackFailedLaunch(game) {
             `${game.name} did not enter the ONA Gaming Display. Launch was cancelled.`;
     }
 
-    await waitForTransition(900);
+    try {
+        await invoke(
+            "restore_game_cursor"
+        );
+    }
+    catch (error) {
+        console.warn(
+            "[ONA Cursor] Could not restore cursor after rollback:",
+            error
+        );
+    }
+
+    console.warn(
+        "[ONA Presentation] User message:",
+        `${game.name} did not enter the ONA Gaming Display. Launch was cancelled.`
+    );
+
+    await waitForTransition(2400);
     hideGameLifecycleOverlay();
     setConsolePresentationState(
         ConsolePresentationState.IDLE
@@ -3059,6 +3216,10 @@ function startRunningGameMonitor(game) {
                         status.state !== "running" ||
                         status.gameId !== game.id
                     ) {
+                        console.log(
+                            "[ONA Runtime] Game process ended or changed:",
+                            status
+                        );
 
                         clearInterval(runningGamePollTimer);
                         runningGamePollTimer =
@@ -3101,6 +3262,18 @@ async function restoreShellAfterGame(game) {
     catch (error) {
         console.error(
             "[ONA Runtime] Shell restore failed:",
+            error
+        );
+    }
+
+    try {
+        await invoke(
+            "restore_game_cursor"
+        );
+    }
+    catch (error) {
+        console.warn(
+            "[ONA Cursor] Could not restore cursor:",
             error
         );
     }
@@ -3193,6 +3366,9 @@ function openGameOptions() {
     gameOptionsMode =
         "menu";
 
+    selectedGameOptionIndex =
+        0;
+
     renderGameOptions();
 
     gameOptionsOverlay
@@ -3209,6 +3385,9 @@ function closeGameOptions() {
 
     gameOptionsMode =
         "menu";
+
+    selectedGameOptionIndex =
+        0;
 
     selectedOptionsGame =
         null;
@@ -3236,6 +3415,8 @@ function renderGameOptions() {
         gameOptionsDetails.textContent =
             "";
     }
+
+    renderGameOptionsActions();
 
     if (!gameOptionsStatus) {
         return;
@@ -3273,7 +3454,138 @@ function renderGameOptions() {
         .remove("confirming");
 
     gameOptionsStatus.textContent =
-        "A PLAY / X UNINSTALL / B BACK";
+        "A SELECT / X UNINSTALL / B BACK";
+
+}
+
+
+function gameOptionsMenuItems() {
+
+    if (gameOptionsMode === "confirm-uninstall") {
+        return [
+            {
+                id:
+                    "confirm-uninstall",
+                label:
+                    "UNINSTALL GAME"
+            }
+        ];
+    }
+
+    if (gameOptionsMode !== "menu") {
+        return [];
+    }
+
+    return [
+        {
+            id:
+                "play",
+            label:
+                "PLAY GAME"
+        },
+        {
+            id:
+                "uninstall",
+            label:
+                "UNINSTALL GAME"
+        }
+    ];
+
+}
+
+
+function renderGameOptionsActions() {
+
+    if (!gameOptionsActions) {
+        return;
+    }
+
+    const items =
+        gameOptionsMenuItems();
+
+    if (!items.length) {
+        gameOptionsActions.innerHTML =
+            "";
+        return;
+    }
+
+    if (selectedGameOptionIndex >= items.length) {
+        selectedGameOptionIndex =
+            items.length - 1;
+    }
+
+    gameOptionsActions.innerHTML =
+        "";
+
+    items.forEach(
+        (item, index) => {
+
+            const button =
+                document.createElement("button");
+
+            button.type =
+                "button";
+
+            button.className =
+                "game-option-item";
+
+            button.dataset.gameOption =
+                item.id;
+
+            button.classList.toggle(
+                "selected",
+                index === selectedGameOptionIndex
+            );
+
+            button.textContent =
+                item.label;
+
+            button.addEventListener(
+                "click",
+                () => {
+                    selectedGameOptionIndex =
+                        index;
+                    renderGameOptions();
+                }
+            );
+
+            gameOptionsActions.appendChild(button);
+
+        }
+    );
+
+}
+
+
+function navigateGameOptions(direction) {
+
+    if (
+        !gameOptionsOpen ||
+        gameOptionsMode !== "menu"
+    ) {
+        return;
+    }
+
+    const items =
+        gameOptionsMenuItems();
+
+    if (!items.length) {
+        return;
+    }
+
+    selectedGameOptionIndex += direction;
+
+    if (selectedGameOptionIndex < 0) {
+        selectedGameOptionIndex =
+            items.length - 1;
+    }
+
+    if (selectedGameOptionIndex >= items.length) {
+        selectedGameOptionIndex =
+            0;
+    }
+
+    renderGameOptions();
 
 }
 
@@ -3288,6 +3600,15 @@ async function activateGameOptions() {
     }
 
     if (gameOptionsMode === "menu") {
+        const selectedAction =
+            gameOptionsMenuItems()[selectedGameOptionIndex]?.id ||
+            "play";
+
+        if (selectedAction === "uninstall") {
+            requestGameUninstallConfirmation();
+            return;
+        }
+
         const gameIndex =
             installedGames.findIndex(
                 (game) =>
@@ -3331,6 +3652,9 @@ function requestGameUninstallConfirmation() {
     gameOptionsMode =
         "confirm-uninstall";
 
+    selectedGameOptionIndex =
+        0;
+
     renderGameOptions();
 
 }
@@ -3348,6 +3672,8 @@ function backFromGameOptions() {
     ) {
         gameOptionsMode =
             "menu";
+        selectedGameOptionIndex =
+            0;
         renderGameOptions();
         return;
     }
@@ -4577,6 +4903,22 @@ window.addEventListener(
 
             switch (event.key) {
 
+                case "ArrowLeft":
+
+                case "ArrowUp":
+
+                    event.preventDefault();
+                    navigateGameOptions(-1);
+                    break;
+
+                case "ArrowRight":
+
+                case "ArrowDown":
+
+                    event.preventDefault();
+                    navigateGameOptions(1);
+                    break;
+
                 case "Enter":
 
                 case " ":
@@ -5293,15 +5635,16 @@ window.addEventListener(
 // SYSTEM MENU
 // =========================================================
 
-function openSystemMenu() {
+function openSystemMenu(context = {}) {
 
     console.log(
-        "Opening ONA system menu"
+        "Opening ONA system menu",
+        context
     );
 
 
     stateBeforeSystemMenu =
-        currentState;
+        context.returnState || currentState;
 
     currentState =
         ONA_STATE.QUICK_MENU;
@@ -5338,11 +5681,45 @@ function openSystemMenu() {
 }
 
 
+async function openSystemMenuDuringGame() {
+
+    if (!nativeGameSessionActive()) {
+        openSystemMenu();
+        return;
+    }
+
+    console.log(
+        "[ONA Quick Menu] Opening over running native game."
+    );
+
+    try {
+        await invoke(
+            "restore_shell_after_game"
+        );
+    }
+    catch (error) {
+        console.error(
+            "[ONA Quick Menu] Could not show ONA overlay over game:",
+            error
+        );
+    }
+
+    setUiOperation("running");
+    openSystemMenu({
+        returnState:
+            ONA_STATE.GAME_RUNNING,
+        gameOverlay:
+            true
+    });
+
+}
+
+
 // =========================================================
 // CLOSE SYSTEM MENU
 // =========================================================
 
-function closeSystemMenu(targetState = stateBeforeSystemMenu) {
+async function closeSystemMenu(targetState = stateBeforeSystemMenu) {
 
     console.log(
         "Closing ONA system menu"
@@ -5364,9 +5741,35 @@ function closeSystemMenu(targetState = stateBeforeSystemMenu) {
         .remove("mouse-enabled");
 
 
-    transitionTo(
-        targetState
-    );
+    if (targetState === ONA_STATE.GAME_RUNNING && runningGameId) {
+        console.log(
+            "[ONA Quick Menu] Closing overlay and returning focus to native game."
+        );
+
+        currentState =
+            ONA_STATE.GAME_RUNNING;
+
+        setUiOperation("running");
+
+        try {
+            await invoke(
+                "hide_game_cursor"
+            );
+            await invoke(
+                "prepare_shell_for_game"
+            );
+        }
+        catch (error) {
+            console.error(
+                "[ONA Quick Menu] Could not return presentation to game:",
+                error
+            );
+        }
+
+        return;
+    }
+
+    transitionTo(targetState);
 
 }
 
@@ -5579,6 +5982,11 @@ tauri.event.listen(
             button,
             state
         );
+
+        if (button === "START") {
+            handleStartButtonState(state);
+            return;
+        }
 
         if (
             currentState ===

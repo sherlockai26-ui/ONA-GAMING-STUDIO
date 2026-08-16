@@ -1,6 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 // Importamos los módulos necesarios de ona_core
+mod cursor_manager;
 mod display_manager;
 mod game_handoff;
 
@@ -295,6 +296,13 @@ fn launch_installed_game(
         display_height,
         target_display.scale_factor
     );
+    println!(
+        "[ONA Runtime] Launch request game_id={} executable={} working_dir={} arguments={:?}",
+        profile.id,
+        profile.executable.display(),
+        profile.working_directory.display(),
+        profile.arguments
+    );
 
     runtime.launcher.launch_with_runtime(
         &profile,
@@ -344,10 +352,28 @@ fn runtime_display_contract_for_profile(
 }
 
 #[tauri::command]
+fn hide_game_cursor(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let window = app_handle.get_webview_window("main");
+    cursor_manager::hide_for_game_session(window.as_ref());
+    Ok(())
+}
+
+#[tauri::command]
+fn restore_game_cursor(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let window = app_handle.get_webview_window("main");
+    cursor_manager::restore_after_game_session(window.as_ref());
+    Ok(())
+}
+
+#[tauri::command]
 fn prepare_shell_for_game(app_handle: tauri::AppHandle) -> Result<(), String> {
     let window = app_handle
         .get_webview_window("main")
         .ok_or_else(|| "Main ONA window was not found.".to_string())?;
+
+    cursor_manager::hide_for_game_session(Some(&window));
+
+    println!("[ONA Presentation] SAFE HANDOFF accepted. Hiding ONA Shell.");
 
     window.hide().map_err(|error| error.to_string())
 }
@@ -386,15 +412,40 @@ async fn wait_for_game_handoff_ready(
         .lock()
         .map_err(|error| error.to_string())?
         .clone();
+    println!(
+        "[ONA Runtime] Lifecycle before handoff wait: {:?}",
+        lifecycle_bridge.status()
+    );
 
     tauri::async_runtime::spawn_blocking(move || {
-        game_handoff::wait_for_game_handoff_ready(
+        println!(
+            "[ONA Presentation] Waiting for handoff pid={} timeout_ms={} target={} @ {},{} {}x{} mode={}",
+            pid,
+            timeout_ms,
+            target.display_id,
+            target.x,
+            target.y,
+            target.width,
+            target.height,
+            target.presentation_mode
+        );
+
+        let status = game_handoff::wait_for_game_handoff_ready(
             pid,
             target,
             timeout_ms,
+            || lifecycle_bridge.has_any_signal(),
             || lifecycle_bridge.has_signal(GameRuntimeSignal::GameDisplayReady),
             || lifecycle_bridge.has_signal(GameRuntimeSignal::GameReady),
-        )
+        );
+
+        println!("[ONA Presentation] Handoff result: {status:#?}");
+        println!(
+            "[ONA Runtime] Lifecycle after handoff wait: {:?}",
+            lifecycle_bridge.status()
+        );
+
+        status
     })
     .await
     .map_err(|error| error.to_string())
@@ -410,6 +461,8 @@ fn restore_shell_after_game(app_handle: tauri::AppHandle) -> Result<(), String> 
     window.show().map_err(|error| error.to_string())?;
     let layout = display_manager::detect_layout(&app_handle).map_err(|error| error.to_string())?;
     display_manager::apply_layout_to_window(&window, &layout).map_err(|error| error.to_string())?;
+    cursor_manager::restore_after_game_session(Some(&window));
+    println!("[ONA Presentation] ONA Shell restored after game session.");
     window.set_focus().map_err(|error| error.to_string())
 }
 
@@ -417,7 +470,13 @@ fn restore_shell_after_game(app_handle: tauri::AppHandle) -> Result<(), String> 
 fn running_game_status(
     runtime: tauri::State<'_, OnaGameRuntime>,
 ) -> Result<RunningGameStatus, String> {
-    Ok(runtime.launcher.status())
+    let status = runtime.launcher.status();
+
+    if status.state != GameLifecycleState::Running {
+        println!("[ONA Runtime] Running game status changed: {status:?}");
+    }
+
+    Ok(status)
 }
 
 #[tauri::command]
@@ -442,13 +501,18 @@ fn uninstall_installed_game(
 fn terminate_running_game(
     runtime: tauri::State<'_, OnaGameRuntime>,
 ) -> Result<RunningGameStatus, String> {
+    println!("[ONA Runtime] terminate_running_game requested by ONA.");
+
     if let Ok(bridge) = runtime.lifecycle_bridge.lock() {
+        println!("[ONA Runtime] Sending ONA_SHUTDOWN to lifecycle bridge clients.");
         bridge.send_control_signal("ONA_SHUTDOWN");
     }
 
     thread::sleep(Duration::from_millis(500));
 
-    runtime.launcher.terminate()
+    let status = runtime.launcher.terminate()?;
+    println!("[ONA Runtime] terminate_running_game result: {status:?}");
+    Ok(status)
 }
 
 #[tauri::command]
@@ -584,6 +648,8 @@ pub fn run() {
             import_local_game,
             launch_installed_game,
             wait_for_game_handoff_ready,
+            hide_game_cursor,
+            restore_game_cursor,
             prepare_shell_for_game,
             restore_shell_after_game,
             running_game_status,
