@@ -385,6 +385,9 @@ let selectedInstallPackageIndex = 0;
 let installedPackageProfile =
     null;
 
+let pendingInstallPackage =
+    null;
+
 let gameOptionsOpen =
     false;
 
@@ -1997,6 +2000,9 @@ async function scanInstallSources() {
     installedPackageProfile =
         null;
 
+    pendingInstallPackage =
+        null;
+
     renderImportBrowser();
 
     try {
@@ -2119,12 +2125,12 @@ function renderImportBrowser(report = {}) {
         case "installing":
 
             setImportStatus(
-                `INSTALLING ${selectedInstallPackage()?.name || "GAME"}`
+                `${installActionLabel(pendingInstallPackage || selectedInstallPackage()).toUpperCase()} ${pendingInstallPackage?.name || selectedInstallPackage()?.name || "GAME"}`
             );
 
             renderImportMessage(
                 "INSTALLING...",
-                "Copying game files to ONA local storage."
+                "Copying and validating game files in ONA local storage."
             );
 
             setImportActions(
@@ -2133,15 +2139,21 @@ function renderImportBrowser(report = {}) {
 
             return;
 
+        case "confirm-replace":
+
+            renderInstallConfirmation();
+
+            return;
+
         case "installed":
 
             setImportStatus(
-                `${installedPackageProfile?.name || "GAME"} INSTALLED SUCCESSFULLY`
+                `${installedPackageProfile?.name || "GAME"} READY`
             );
 
             renderImportMessage(
-                "INSTALL COMPLETE",
-                "The game is now available in your ONA Game Library."
+                "LIBRARY UPDATED",
+                "The local ONA Game Library now points to this package."
             );
 
             setImportActions(
@@ -2250,15 +2262,16 @@ function renderInstallPackageCards() {
                 index === selectedInstallPackageIndex
             );
 
-            card.classList.toggle(
-                "disabled",
-                Boolean(game.alreadyInstalled)
-            );
-
             const iconMarkup =
                 game.icon
                     ? `<img class="import-game-icon" src="${escapeAttribute(game.icon)}" alt="">`
                     : `<div class="import-game-icon import-game-icon-placeholder">${escapeHtml(game.name?.slice(0, 2) || "ON")}</div>`;
+            const actionLabel =
+                installActionLabel(game).toUpperCase();
+            const installedVersion =
+                game.installedVersion
+                    ? `INSTALLED ${escapeHtml(game.installedVersion)}`
+                    : "NOT INSTALLED";
 
             card.innerHTML =
                 `${iconMarkup}
@@ -2266,9 +2279,9 @@ function renderInstallPackageCards() {
                     <span class="import-game-source">${escapeHtml(game.sourceName || "EXTERNAL STORAGE")}</span>
                     <strong>${escapeHtml(game.name || "Untitled Game")}</strong>
                     <span>${escapeHtml(game.gameId || "")}</span>
-                    <span>VERSION ${escapeHtml(game.version || "0.0.0")}</span>
+                    <span>PACKAGE ${escapeHtml(game.version || "0.0.0")} / ${installedVersion}</span>
                     <span>${game.alreadyInstalled ? "GAME ALREADY INSTALLED" : "ONA COMPATIBLE"}</span>
-                    <em>${game.alreadyInstalled ? "INSTALLED" : "READY TO INSTALL"}</em>
+                    <em>${actionLabel}</em>
                 </div>`;
 
             card.addEventListener(
@@ -2305,6 +2318,75 @@ function renderInvalidPackageDetails() {
 
     importDetails.textContent =
         `Developer details: ${invalidInstallPackages.length} incompatible package${invalidInstallPackages.length === 1 ? "" : "s"} ignored.`;
+
+}
+
+
+function renderInstallConfirmation() {
+
+    const game =
+        pendingInstallPackage || selectedInstallPackage();
+
+    if (!game) {
+        importBrowserState =
+            "found";
+        renderImportBrowser();
+        return;
+    }
+
+    const actionLabel =
+        installActionLabel(game).toUpperCase();
+    const installedVersion =
+        game.installedVersion || "not installed";
+    const packageVersion =
+        game.version || "unknown";
+
+    setImportStatus(
+        `${actionLabel} ${game.name || "GAME"}`
+    );
+
+    if (importResults) {
+        importResults.innerHTML =
+            `<div class="import-message">
+                <div class="import-pulse"></div>
+                <strong>${escapeHtml(actionLabel)}</strong>
+                <span>${escapeHtml(game.name || "Untitled Game")}</span>
+                <span>Installed: ${escapeHtml(installedVersion)}</span>
+                <span>Package: ${escapeHtml(packageVersion)}</span>
+            </div>`;
+    }
+
+    if (importDetails) {
+        importDetails.hidden =
+            false;
+        importDetails.textContent =
+            "Developer details: ONA will validate the package, stage the replacement, and keep the current installation if replacement fails.";
+    }
+
+    setImportActions(
+        [`A ${actionLabel}`, "B CANCEL"]
+    );
+
+}
+
+
+function installActionLabel(game) {
+
+    switch (game?.installAction) {
+
+        case "update":
+            return "Update Game";
+
+        case "reinstall":
+            return "Reinstall Game";
+
+        case "downgrade":
+            return "Install Older Version";
+
+        default:
+            return "Install Game";
+
+    }
 
 }
 
@@ -2387,6 +2469,15 @@ async function activateImportBrowser() {
     }
 
     if (
+        importBrowserState === "confirm-replace"
+    ) {
+        await installSelectedPackage(
+            pendingInstallPackage || selectedInstallPackage()
+        );
+        return;
+    }
+
+    if (
         importBrowserState === "error" ||
         importBrowserState === "package-error"
     ) {
@@ -2409,24 +2500,33 @@ async function activateImportBrowser() {
 
     if (game.alreadyInstalled) {
         importBrowserState =
-            "package-error";
-        invalidInstallPackages =
-            [
-                {
-                    error:
-                        "Game already installed. ONA Runtime V1 does not support updates yet."
-                }
-            ];
+            "confirm-replace";
+        pendingInstallPackage =
+            game;
         renderImportBrowser();
+        return;
+    }
+
+    await installSelectedPackage(game);
+
+}
+
+
+async function installSelectedPackage(game) {
+
+    if (!game) {
         return;
     }
 
     if (libraryStatus) {
         libraryStatus.textContent =
-            "Installing game package.";
+            `${installActionLabel(game)}.`;
     }
 
     setUiOperation("installing");
+
+    pendingInstallPackage =
+        game;
 
     importBrowserState =
         "installing";
@@ -2441,8 +2541,8 @@ async function activateImportBrowser() {
                 {
                     sourceDir:
                         String(game.packagePath),
-                    overwrite:
-                        false
+                    action:
+                        game.installAction || "install"
                 }
             );
 
@@ -2453,6 +2553,9 @@ async function activateImportBrowser() {
 
         installedPackageProfile =
             profile;
+
+        pendingInstallPackage =
+            null;
 
         importBrowserState =
             "installed";
@@ -2474,12 +2577,16 @@ async function activateImportBrowser() {
         importBrowserState =
             "package-error";
         setUiOperation("idle");
+        pendingInstallPackage =
+            null;
 
         invalidInstallPackages =
             [
                 {
                     error:
-                        String(error)
+                        String(error) === "GAME_IS_CURRENTLY_RUNNING"
+                            ? "GAME IS CURRENTLY RUNNING. Close the game before updating or reinstalling."
+                            : String(error)
                 }
             ];
 
@@ -2501,6 +2608,17 @@ function backFromImportBrowser() {
     ) {
         closeImportBrowser();
         loadGameLibrary();
+        return;
+    }
+
+    if (
+        importBrowserState === "confirm-replace"
+    ) {
+        importBrowserState =
+            "found";
+        pendingInstallPackage =
+            null;
+        renderImportBrowser();
         return;
     }
 

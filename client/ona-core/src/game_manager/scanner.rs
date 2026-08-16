@@ -1,7 +1,11 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-use super::{library::GameLibrary, manifest::GameManifest};
+use super::{
+    importer::{plan_game_install, GameInstallAction},
+    library::GameLibrary,
+    manifest::GameManifest,
+};
 
 const ONA_LIBRARY_DIR: &str = "ONA Library";
 
@@ -38,6 +42,8 @@ pub struct ScannedGamePackage {
     pub icon: Option<String>,
     pub status: PackageScanStatus,
     pub already_installed: bool,
+    pub install_action: GameInstallAction,
+    pub installed_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -72,17 +78,6 @@ pub fn scan_game_packages(
     library: &GameLibrary,
     sources: Vec<InstallationSource>,
 ) -> PackageScanReport {
-    let installed_ids = library
-        .list_games()
-        .map(|catalog| {
-            catalog
-                .games
-                .into_iter()
-                .map(|game| game.id)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
     let mut games = Vec::new();
     let mut invalid_packages = Vec::new();
 
@@ -99,9 +94,11 @@ pub fn scan_game_packages(
 
             match GameManifest::read_from_dir(&package_path) {
                 Ok(manifest) => {
-                    let already_installed = installed_ids
-                        .iter()
-                        .any(|installed_id| installed_id == &manifest.identity.id);
+                    let plan = plan_game_install(library, &package_path).ok();
+                    let already_installed = plan
+                        .as_ref()
+                        .map(|plan| plan.already_installed)
+                        .unwrap_or(false);
 
                     games.push(ScannedGamePackage {
                         package_id: format!("{}:{}", source.id, manifest.identity.id),
@@ -124,6 +121,11 @@ pub fn scan_game_packages(
                             PackageScanStatus::ReadyToInstall
                         },
                         already_installed,
+                        install_action: plan
+                            .as_ref()
+                            .map(|plan| plan.action)
+                            .unwrap_or(GameInstallAction::Install),
+                        installed_version: plan.and_then(|plan| plan.installed_version),
                     });
                 }
                 Err(error) => invalid_packages.push(InvalidGamePackage {

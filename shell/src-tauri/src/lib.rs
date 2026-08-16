@@ -6,7 +6,7 @@ mod game_handoff;
 
 use ona_core::game_manager::{
     catalog::GameCatalog,
-    importer::import_game_from_dir,
+    importer::{install_or_replace_game_from_dir, GameInstallAction},
     library::GameLibrary,
     profile::GameProfile,
     scanner::{scan_external_game_packages, PackageScanReport},
@@ -216,13 +216,27 @@ fn list_installed_games(app_handle: tauri::AppHandle) -> Result<GameCatalog, Str
 #[tauri::command]
 fn import_local_game(
     app_handle: tauri::AppHandle,
+    runtime: tauri::State<'_, OnaGameRuntime>,
     source_dir: String,
-    overwrite: bool,
+    action: Option<GameInstallAction>,
 ) -> Result<GameProfile, String> {
     let source_dir = PathBuf::from(source_dir);
     let library = game_library(&app_handle)?;
+    let action = action.unwrap_or(GameInstallAction::Install);
+    let manifest = ona_core::game_manager::manifest::GameManifest::read_from_dir(&source_dir)
+        .map_err(|error| error.to_string())?;
+    let status = runtime.launcher.status();
 
-    import_game_from_dir(&library, source_dir, overwrite).map_err(|error| error.to_string())
+    if game_id_is_running(&status, &manifest.identity.id) {
+        return Err("GAME_IS_CURRENTLY_RUNNING".to_string());
+    }
+
+    install_or_replace_game_from_dir(&library, source_dir, action)
+        .map_err(|error| error.to_string())
+}
+
+fn game_id_is_running(status: &RunningGameStatus, game_id: &str) -> bool {
+    status.state == GameLifecycleState::Running && status.game_id.as_deref() == Some(game_id)
 }
 
 #[tauri::command]
@@ -515,6 +529,33 @@ fn save_controller_profile(
     fs::write(profile_path, profile_json).map_err(|error| error.to_string())?;
 
     Ok(profile)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::game_id_is_running;
+    use ona_core::{launcher::state::RunningGameStatus, runtime::lifecycle::GameLifecycleState};
+
+    #[test]
+    fn running_game_blocks_replacement_for_same_game_id_only() {
+        let running = RunningGameStatus {
+            game_id: Some("studio.test.running".to_string()),
+            pid: Some(42),
+            state: GameLifecycleState::Running,
+            exit_code: None,
+            error: None,
+        };
+
+        assert!(game_id_is_running(&running, "studio.test.running"));
+        assert!(!game_id_is_running(&running, "studio.test.other"));
+
+        let idle = RunningGameStatus {
+            state: GameLifecycleState::Idle,
+            ..running
+        };
+
+        assert!(!game_id_is_running(&idle, "studio.test.running"));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

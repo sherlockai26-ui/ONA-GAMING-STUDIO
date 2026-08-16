@@ -23,7 +23,10 @@ mod tests {
 
     use crate::{
         game_manager::{
-            importer::import_game_from_dir,
+            importer::{
+                compare_versions, import_game_from_dir, install_or_replace_game_from_dir,
+                plan_game_install, GameInstallAction,
+            },
             library::GameLibrary,
             scanner::{scan_game_packages, InstallationSource, InstallationSourceKind},
         },
@@ -379,6 +382,11 @@ mod tests {
             .games
             .iter()
             .any(|game| game.game_id == "studio.test.one" && game.already_installed));
+        assert!(report.games.iter().any(|game| {
+            game.game_id == "studio.test.one"
+                && game.install_action == GameInstallAction::Reinstall
+                && game.installed_version.as_deref() == Some("0.1.0")
+        }));
         assert!(report
             .games
             .iter()
@@ -423,6 +431,156 @@ mod tests {
             .is_empty());
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn install_update_reinstall_and_downgrade_are_explicit_and_refresh_library() {
+        let root = unique_temp_dir();
+        let app_data = root.join("ona-data");
+        let library = GameLibrary::new(&app_data);
+        let install = root.join("install-package");
+        let update = root.join("update-package");
+        let reinstall = root.join("reinstall-package");
+        let downgrade = root.join("downgrade-package");
+
+        create_versioned_package(
+            &install,
+            "studio.test.replace",
+            "Replace Game",
+            "0.1.0",
+            false,
+        );
+        let installed =
+            install_or_replace_game_from_dir(&library, &install, GameInstallAction::Install)
+                .expect("new package should install");
+        assert_eq!(installed.version, "0.1.0");
+        assert!(!installed.fullscreen);
+
+        create_versioned_package(
+            &update,
+            "studio.test.replace",
+            "Replace Game",
+            "0.2.0",
+            true,
+        );
+        let plan = plan_game_install(&library, &update).expect("update plan should be valid");
+        assert_eq!(plan.action, GameInstallAction::Update);
+        assert_eq!(plan.installed_version.as_deref(), Some("0.1.0"));
+        let updated =
+            install_or_replace_game_from_dir(&library, &update, GameInstallAction::Update)
+                .expect("newer version should update");
+        assert_eq!(updated.version, "0.2.0");
+        assert!(updated.fullscreen);
+        assert!(
+            library
+                .get_game("studio.test.replace")
+                .expect("library should return updated profile")
+                .fullscreen
+        );
+
+        create_versioned_package(
+            &reinstall,
+            "studio.test.replace",
+            "Replace Game",
+            "0.2.0",
+            false,
+        );
+        let plan = plan_game_install(&library, &reinstall).expect("reinstall plan should be valid");
+        assert_eq!(plan.action, GameInstallAction::Reinstall);
+        let reinstalled =
+            install_or_replace_game_from_dir(&library, &reinstall, GameInstallAction::Reinstall)
+                .expect("same version should reinstall");
+        assert_eq!(reinstalled.version, "0.2.0");
+        assert!(!reinstalled.fullscreen);
+
+        create_versioned_package(
+            &downgrade,
+            "studio.test.replace",
+            "Replace Game",
+            "0.1.5",
+            true,
+        );
+        let plan = plan_game_install(&library, &downgrade).expect("downgrade plan should be valid");
+        assert_eq!(plan.action, GameInstallAction::Downgrade);
+        let downgraded =
+            install_or_replace_game_from_dir(&library, &downgrade, GameInstallAction::Downgrade)
+                .expect("older version should install only when explicit");
+        assert_eq!(downgraded.version, "0.1.5");
+        assert!(downgraded.fullscreen);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn replacement_failure_keeps_previous_installation_functional() {
+        let root = unique_temp_dir();
+        let app_data = root.join("ona-data");
+        let library = GameLibrary::new(&app_data);
+        let installed_package = root.join("installed-package");
+        let invalid_package = root.join("invalid-package");
+
+        create_versioned_package(
+            &installed_package,
+            "studio.test.rollback",
+            "Rollback Game",
+            "1.0.0",
+            true,
+        );
+        install_or_replace_game_from_dir(&library, &installed_package, GameInstallAction::Install)
+            .expect("initial package should install");
+
+        fs::create_dir_all(&invalid_package).expect("invalid package dir should be created");
+        fs::write(
+            invalid_package.join("game.json"),
+            r#"{
+                "manifestVersion": 1,
+                "identity": {
+                    "id": "studio.test.rollback",
+                    "name": "Rollback Game",
+                    "version": "2.0.0"
+                },
+                "presentation": {
+                    "description": "Broken replacement"
+                },
+                "execution": {
+                    "executable": "missing-game.exe"
+                }
+            }"#,
+        )
+        .expect("invalid package manifest should be written");
+
+        assert!(install_or_replace_game_from_dir(
+            &library,
+            &invalid_package,
+            GameInstallAction::Update,
+        )
+        .is_err());
+
+        let current = library
+            .get_game("studio.test.rollback")
+            .expect("previous install should remain readable");
+        assert_eq!(current.version, "1.0.0");
+        assert!(current.fullscreen);
+        assert!(current.executable.is_file());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn version_comparison_is_numeric_and_prerelease_aware() {
+        assert_eq!(
+            compare_versions("0.10.0", "0.2.0"),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(compare_versions("1.0.0", "1.0"), std::cmp::Ordering::Equal);
+        assert_eq!(
+            compare_versions("1.0.0-alpha", "1.0.0"),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            compare_versions("1.0.1", "1.0.0"),
+            std::cmp::Ordering::Greater
+        );
     }
 
     #[cfg(windows)]
@@ -572,6 +730,50 @@ mod tests {
                 }},
                 "display": {{
                     "fullscreen": false
+                }},
+                "input": {{
+                    "profile": "ona-standard-controller-v1"
+                }}
+            }}"#,
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        );
+
+        fs::write(package_dir.join("game.json"), manifest).expect("manifest should be written");
+    }
+
+    fn create_versioned_package(
+        package_dir: &Path,
+        id: &str,
+        name: &str,
+        version: &str,
+        fullscreen: bool,
+    ) {
+        fs::create_dir_all(package_dir).expect("package directory should be created");
+        let executable = create_test_executable(package_dir);
+        let manifest = format!(
+            r#"{{
+                "manifestVersion": 1,
+                "identity": {{
+                    "id": "{id}",
+                    "name": "{name}",
+                    "version": "{version}",
+                    "developer": "ONA Test Lab"
+                }},
+                "presentation": {{
+                    "description": "Replacement verification package."
+                }},
+                "execution": {{
+                    "executable": "{executable}",
+                    "workingDirectory": ".",
+                    "arguments": []
+                }},
+                "requirements": {{
+                    "platform": "{}",
+                    "architecture": "{}"
+                }},
+                "display": {{
+                    "fullscreen": {fullscreen}
                 }},
                 "input": {{
                     "profile": "ona-standard-controller-v1"
