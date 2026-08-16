@@ -184,6 +184,105 @@ pub fn wait_for_game_handoff_ready(
     }
 }
 
+pub fn focus_process_window(pid: u32) -> bool {
+    platform_visible_window_for_pid(pid)
+        .as_ref()
+        .map(platform_try_foreground_window)
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+pub fn log_visible_windows(reason: &str) {
+    use windows::Win32::{
+        Foundation::{BOOL, HWND, LPARAM, RECT},
+        UI::WindowsAndMessaging::{
+            EnumWindows, GetClassNameW, GetClientRect, GetWindow, GetWindowLongPtrW, GetWindowRect,
+            GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, GWL_STYLE,
+            GW_OWNER,
+        },
+    };
+
+    unsafe extern "system" fn enum_window(window: HWND, lparam: LPARAM) -> BOOL {
+        let reason = &*(lparam.0 as *const String);
+
+        if !IsWindowVisible(window).as_bool() {
+            return BOOL(1);
+        }
+
+        let mut pid = 0;
+        GetWindowThreadProcessId(window, Some(&mut pid));
+
+        let owner = GetWindow(window, GW_OWNER).ok();
+        let mut owner_pid = 0;
+        if let Some(owner_window) = owner {
+            if owner_window.0 != std::ptr::null_mut() {
+                GetWindowThreadProcessId(owner_window, Some(&mut owner_pid));
+            }
+        }
+
+        let mut rect = RECT::default();
+        let rect_text = if GetWindowRect(window, &mut rect).is_ok() {
+            format!(
+                "{},{},{}x{}",
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top
+            )
+        } else {
+            "unavailable".to_string()
+        };
+
+        let client_text = if GetClientRect(window, &mut rect).is_ok() {
+            format!(
+                "{},{},{}x{}",
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top
+            )
+        } else {
+            "unavailable".to_string()
+        };
+
+        let style = GetWindowLongPtrW(window, GWL_STYLE) as u32;
+        let ex_style = GetWindowLongPtrW(window, GWL_EXSTYLE) as u32;
+
+        let mut class_name = [0u16; 256];
+        let class_len = GetClassNameW(window, &mut class_name);
+        let class_name = String::from_utf16_lossy(&class_name[..class_len as usize]);
+
+        let mut title = [0u16; 256];
+        let title_len = GetWindowTextW(window, &mut title);
+        let title = String::from_utf16_lossy(&title[..title_len as usize]);
+
+        println!(
+            "[ONA WindowDiag] reason={} hwnd={:?} pid={} ownerPid={} class=\"{}\" title=\"{}\" rect={} client={} visible=true style=0x{:08X} ex_style=0x{:08X}",
+            reason,
+            window.0,
+            pid,
+            owner_pid,
+            class_name,
+            title,
+            rect_text,
+            client_text,
+            style,
+            ex_style
+        );
+
+        BOOL(1)
+    }
+
+    let reason = reason.to_string();
+
+    unsafe {
+        let _ = EnumWindows(Some(enum_window), LPARAM(&reason as *const String as isize));
+    }
+}
+
+#[cfg(not(windows))]
+pub fn log_visible_windows(_reason: &str) {}
+
 fn should_return_legacy_fallback(presentation_valid: bool, ona_compatible: bool) -> bool {
     presentation_valid && !ona_compatible
 }

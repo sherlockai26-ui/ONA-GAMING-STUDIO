@@ -47,38 +47,142 @@ const websocketPort = window.location.port || "8080";
 const wsUrl = `${websocketScheme}://${window.location.hostname}:${websocketPort}/ws`;
 
 console.log("[ONA CONTROLLER] WebSocket URL:", wsUrl);
-console.log("[ONA CONTROLLER] WebSocket connecting...");
 
-const controllerSocket = new WebSocket(wsUrl);
+const reconnectBackoffMs = [500, 1000, 2000, 3000, 5000];
+let controllerSocket = null;
+let reconnectAttempt = 0;
+let reconnectTimer = null;
+let heartbeatTimer = null;
+let reconnectEnabled = true;
+let playerId = null;
 
 function sendControllerMessage(message) {
-    if (controllerSocket.readyState === WebSocket.OPEN) {
+    if (controllerSocket?.readyState === WebSocket.OPEN) {
         controllerSocket.send(JSON.stringify(message));
     }
 }
 
-controllerSocket.addEventListener(
-    "open",
-    () => {
-        console.log("[ONA CONTROLLER] WebSocket open");
+function setControllerConnectionState(label) {
+    document.body.dataset.connectionState = label.toLowerCase();
+    const status = document.getElementById("connection-status");
 
-        sendControllerMessage({
-            type: "controller_connected",
-            sessionId,
-            token
-        });
+    if (status) {
+        status.textContent = label;
     }
-);
+}
 
-controllerSocket.addEventListener(
-    "error",
-    (event) => console.error("[ONA CONTROLLER] WebSocket error:", event)
-);
+function connectWebSocket() {
+    console.log("[ONA CONTROLLER] WebSocket connecting...");
+    controllerSocket = new WebSocket(wsUrl);
 
-controllerSocket.addEventListener(
-    "close",
-    (event) => console.warn("[ONA CONTROLLER] WebSocket close:", event.code, event.reason)
-);
+    controllerSocket.addEventListener(
+        "open",
+        () => {
+            console.log("[ONA CONTROLLER] WebSocket open");
+
+            sendControllerMessage({
+                type: "controller_connected",
+                sessionId,
+                token
+            });
+            startHeartbeat();
+        }
+    );
+
+    controllerSocket.addEventListener(
+        "message",
+        (event) => {
+            let message = null;
+
+            try {
+                message = JSON.parse(event.data);
+            }
+            catch {
+                return;
+            }
+
+            if (message.type === "controller_authenticated") {
+                playerId = message.playerId;
+                reconnectAttempt = 0;
+                console.log("[CONTROLLER] reconnected");
+                console.log("[CONTROLLER] session resumed player=", playerId);
+                setControllerConnectionState("CONNECTED");
+                return;
+            }
+
+            if (message.type === "controller_auth_rejected") {
+                reconnectEnabled = false;
+                stopHeartbeat();
+                console.warn("[CONTROLLER] reconnect rejected", message.reason);
+                setControllerConnectionState("SESSION EXPIRED");
+                return;
+            }
+        }
+    );
+
+    controllerSocket.addEventListener(
+        "error",
+        (event) => {
+            console.error("[ONA CONTROLLER] WebSocket error:", event);
+        }
+    );
+
+    controllerSocket.addEventListener(
+        "close",
+        (event) => {
+            console.warn("[ONA CONTROLLER] WebSocket close:", event.code, event.reason);
+            console.warn("[CONTROLLER] websocket lost");
+            stopHeartbeat();
+            neutralizeLocalInputState();
+            scheduleReconnect();
+        }
+    );
+}
+
+function scheduleReconnect() {
+    if (!reconnectEnabled || reconnectTimer) {
+        return;
+    }
+
+    setControllerConnectionState("RECONNECTING...");
+    const delay =
+        reconnectBackoffMs[Math.min(reconnectAttempt, reconnectBackoffMs.length - 1)];
+
+    reconnectAttempt += 1;
+    console.log("[CONTROLLER] reconnect attempt=", reconnectAttempt);
+
+    reconnectTimer =
+        window.setTimeout(
+            () => {
+                reconnectTimer = null;
+                connectWebSocket();
+            },
+            delay
+        );
+}
+
+function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatTimer =
+        window.setInterval(
+            () => {
+                sendControllerMessage({
+                    type: "ping",
+                    timestamp: Date.now()
+                });
+            },
+            5000
+        );
+}
+
+function stopHeartbeat() {
+    if (heartbeatTimer) {
+        window.clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+    }
+}
+
+connectWebSocket();
 
 const activePointers = new Map();
 const activeButtonCounts = new Map();
@@ -183,6 +287,23 @@ function resetJoystick() {
         x: 0,
         y: 0
     });
+}
+
+function neutralizeLocalInputState() {
+    for (const pointerId of [...activePointers.keys()]) {
+        const state = activePointers.get(pointerId);
+
+        if (state?.type === "button") {
+            state.element?.classList?.remove("virtual-pressed");
+        }
+
+        activePointers.delete(pointerId);
+    }
+
+    activeButtonCounts.clear();
+    joystickPointerId = null;
+    joystick.style.transform = "translate(-50%, -50%)";
+    console.log("[CONTROLLER] local input state neutralized");
 }
 
 function pressButton(button, pointerId) {

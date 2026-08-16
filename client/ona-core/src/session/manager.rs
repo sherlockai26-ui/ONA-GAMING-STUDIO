@@ -2,12 +2,31 @@
 // Gestión de sesiones de controladores ONA.
 
 use super::token::SessionToken;
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
 
 #[derive(Debug, Clone)]
 pub struct ControllerSession {
     pub id: String,
     pub token: SessionToken,
     pub players_connected: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ControllerConnectionState {
+    Paired,
+    Connected,
+    DisconnectedTemporary,
+}
+
+#[derive(Debug, Clone)]
+pub struct PairedController {
+    pub session_id: String,
+    pub token: String,
+    pub player_id: u8,
+    pub state: ControllerConnectionState,
 }
 
 impl ControllerSession {
@@ -26,6 +45,13 @@ impl ControllerSession {
     }
 }
 
+static PAIRING_SESSION: OnceLock<Mutex<ControllerSession>> = OnceLock::new();
+static PAIRED_CONTROLLERS: OnceLock<Mutex<HashMap<String, PairedController>>> = OnceLock::new();
+
+fn paired_controllers() -> &'static Mutex<HashMap<String, PairedController>> {
+    PAIRED_CONTROLLERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 pub fn create_session() -> ControllerSession {
     let session = ControllerSession::new();
 
@@ -34,4 +60,151 @@ pub fn create_session() -> ControllerSession {
     println!("TOKEN: {}", session.token.value);
 
     session
+}
+
+pub fn persistent_pairing_session() -> ControllerSession {
+    let session = PAIRING_SESSION.get_or_init(|| Mutex::new(create_session()));
+
+    session
+        .lock()
+        .expect("controller pairing session lock should not be poisoned")
+        .clone()
+}
+
+pub fn reset_pairing_session(reason: &str) -> ControllerSession {
+    let session = PAIRING_SESSION.get_or_init(|| Mutex::new(create_session()));
+    let mut session = session
+        .lock()
+        .expect("controller pairing session lock should not be poisoned");
+    *session = create_session();
+
+    paired_controllers()
+        .lock()
+        .expect("paired controller lock should not be poisoned")
+        .clear();
+
+    println!("[ONA Controller] session expired reason={reason}");
+    session.clone()
+}
+
+pub fn authenticate_controller(session_id: &str, token: &str) -> Result<PairedController, String> {
+    let session = persistent_pairing_session();
+
+    if session.id != session_id || session.token.value != token {
+        println!("[ONA Controller] session expired reason=invalid_credentials");
+        return Err("INVALID_CONTROLLER_SESSION".to_string());
+    }
+
+    let mut controllers = paired_controllers()
+        .lock()
+        .map_err(|error| error.to_string())?;
+
+    if let Some(controller) = controllers.get_mut(session_id) {
+        controller.state = ControllerConnectionState::Connected;
+        println!(
+            "[ONA Controller] reconnect authenticated player={}",
+            controller.player_id
+        );
+        return Ok(controller.clone());
+    }
+
+    let player_id = (controllers.len() as u8).saturating_add(1);
+    let controller = PairedController {
+        session_id: session_id.to_string(),
+        token: token.to_string(),
+        player_id,
+        state: ControllerConnectionState::Connected,
+    };
+
+    controllers.insert(session_id.to_string(), controller.clone());
+    println!("[ONA Controller] paired session={session_id} player={player_id}");
+
+    Ok(controller)
+}
+
+pub fn mark_controller_disconnected(session_id: &str) -> Option<PairedController> {
+    let mut controllers = paired_controllers().lock().ok()?;
+    let controller = controllers.get_mut(session_id)?;
+    controller.state = ControllerConnectionState::DisconnectedTemporary;
+    println!(
+        "[ONA Controller] websocket disconnected player={}",
+        controller.player_id
+    );
+    println!("[ONA Controller] pairing retained");
+    println!("[ONA Controller] waiting for reconnect");
+
+    Some(controller.clone())
+}
+
+#[cfg(test)]
+pub fn clear_persistent_pairings_for_tests() {
+    if let Some(session) = PAIRING_SESSION.get() {
+        *session
+            .lock()
+            .expect("controller pairing session lock should not be poisoned") =
+            ControllerSession::new();
+    }
+
+    paired_controllers()
+        .lock()
+        .expect("paired controller lock should not be poisoned")
+        .clear();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        authenticate_controller, clear_persistent_pairings_for_tests, mark_controller_disconnected,
+        persistent_pairing_session, ControllerConnectionState,
+    };
+
+    #[test]
+    fn websocket_drop_retains_pairing_session() {
+        clear_persistent_pairings_for_tests();
+        let session = persistent_pairing_session();
+        let paired = authenticate_controller(&session.id, &session.token.value)
+            .expect("controller should pair");
+
+        let disconnected = mark_controller_disconnected(&session.id)
+            .expect("paired controller should be marked disconnected");
+
+        assert_eq!(paired.player_id, disconnected.player_id);
+        assert_eq!(
+            disconnected.state,
+            ControllerConnectionState::DisconnectedTemporary
+        );
+        assert_eq!(persistent_pairing_session().id, session.id);
+        assert_eq!(
+            persistent_pairing_session().token.value,
+            session.token.value
+        );
+    }
+
+    #[test]
+    fn reconnect_restores_same_player_id() {
+        clear_persistent_pairings_for_tests();
+        let session = persistent_pairing_session();
+        let first = authenticate_controller(&session.id, &session.token.value)
+            .expect("controller should pair");
+        let _ = mark_controller_disconnected(&session.id);
+
+        let resumed = authenticate_controller(&session.id, &session.token.value)
+            .expect("controller should resume");
+
+        assert_eq!(resumed.player_id, first.player_id);
+        assert_eq!(resumed.state, ControllerConnectionState::Connected);
+    }
+
+    #[test]
+    fn invalid_token_is_rejected_without_replacing_pairing_session() {
+        clear_persistent_pairings_for_tests();
+        let session = persistent_pairing_session();
+
+        assert!(authenticate_controller(&session.id, "WRONG").is_err());
+        assert_eq!(persistent_pairing_session().id, session.id);
+        assert_eq!(
+            persistent_pairing_session().token.value,
+            session.token.value
+        );
+    }
 }

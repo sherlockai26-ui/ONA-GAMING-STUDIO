@@ -2992,6 +2992,24 @@ body {
         );
 }
 
+.home-continue-card.home-background-session {
+    box-shadow:
+        0 0 0 1px
+        rgba(
+            120,
+            255,
+            210,
+            0.38
+        ),
+        0 0 36px
+        rgba(
+            60,
+            255,
+            205,
+            0.18
+        );
+}
+
 .home-continue-card::before {
     content: "";
 
@@ -4750,13 +4768,7 @@ body {
     padding:
         clamp(20px, 4vw, 54px);
 
-    background:
-        rgba(
-            0,
-            0,
-            0,
-            0.78
-        );
+    background: #000;
 
     backdrop-filter:
         blur(14px);
@@ -4788,8 +4800,8 @@ body {
     background:
         radial-gradient(
             circle at 50% 42%,
-            rgba(20, 58, 78, 0.72),
-            rgba(0, 0, 0, 0.96) 62%
+            rgb(8, 32, 44),
+            rgb(0, 0, 0) 62%
         );
 }
 
@@ -7525,6 +7537,33 @@ body[data-visual-intensity="low"] #ona-shell {
     visibility: visible;
 
     pointer-events: auto;
+}
+
+body.game-system-overlay #ona-shell,
+body.game-system-overlay .ona-footer {
+    visibility: hidden;
+}
+
+body.game-system-overlay .system-menu {
+    background:
+        rgba(
+            0,
+            0,
+            0,
+            0.38
+        );
+
+    backdrop-filter: none;
+}
+
+body.game-system-overlay .system-menu-panel {
+    background:
+        rgba(
+            5,
+            13,
+            22,
+            0.88
+        );
 }
 
 .system-menu-panel {

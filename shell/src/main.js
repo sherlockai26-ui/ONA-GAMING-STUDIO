@@ -341,8 +341,50 @@ const ConsolePresentationState = {
         "Failed"
 };
 
+const GameSessionState = {
+    IDLE:
+        "Idle",
+    NONE:
+        "None",
+    LAUNCHING:
+        "Launching",
+    RUNNING:
+        "Running",
+    RUNNING_FOREGROUND:
+        "RunningForeground",
+    BACKGROUND:
+        "Background",
+    SYSTEM_OVERLAY:
+        "SystemOverlay",
+    STOPPING:
+        "Stopping",
+    EXITED:
+        "Exited",
+    RETURNING:
+        "Returning",
+    FAILED:
+        "Failed"
+};
+
+const PresentationOwner = {
+    ONA_SHELL:
+        "ONA_SHELL",
+    ONA_TRANSITION_GUARD:
+        "ONA_TRANSITION_GUARD",
+    GAME:
+        "GAME",
+    ONA_SYSTEM_OVERLAY:
+        "ONA_SYSTEM_OVERLAY"
+};
+
 let consolePresentationState =
     ConsolePresentationState.IDLE;
+
+let gameSessionState =
+    GameSessionState.IDLE;
+
+let presentationOwner =
+    PresentationOwner.ONA_SHELL;
 
 
 // =========================================================
@@ -409,6 +451,12 @@ let runningGamePollTimer =
 let runningGameId =
     null;
 
+let activeGameSession =
+    null;
+
+let pendingPlayAfterCloseGame =
+    null;
+
 let uiOperationState =
     "idle";
 
@@ -452,7 +500,8 @@ function nativeGameSessionActive() {
     return (
         uiOperationState === "running" ||
         currentState === ONA_STATE.GAME_RUNNING ||
-        Boolean(runningGameId)
+        Boolean(runningGameId) ||
+        Boolean(activeGameSession?.pid)
     );
 
 }
@@ -478,6 +527,177 @@ function setConsolePresentationState(state) {
         "data-presentation-state",
         consolePresentationState
     );
+
+}
+
+
+function setGameSessionState(state) {
+
+    if (gameSessionState === state) {
+        return;
+    }
+
+    console.log(
+        `[ONA Session] state ${gameSessionState} -> ${state}`
+    );
+
+    gameSessionState =
+        state;
+
+}
+
+
+function setPresentationOwner(owner) {
+
+    if (presentationOwner === owner) {
+        return;
+    }
+
+    console.log(
+        `[ONA Presentation] owner ${presentationOwner} -> ${owner}`
+    );
+
+    presentationOwner =
+        owner;
+
+}
+
+
+function setActiveGameSession(session) {
+
+    activeGameSession =
+        session;
+
+    runningGameId =
+        session?.gameId || null;
+
+    console.log(
+        "[ONA Session] active",
+        activeGameSession || "None"
+    );
+
+    renderActiveGameSessionUi();
+
+}
+
+
+function updateActiveGameSession(fields) {
+
+    if (!activeGameSession) {
+        return;
+    }
+
+    setActiveGameSession({
+        ...activeGameSession,
+        ...fields
+    });
+
+}
+
+
+function activeSessionGame() {
+
+    if (!activeGameSession?.gameId) {
+        return null;
+    }
+
+    return installedGames.find(
+        (game) =>
+            game.id === activeGameSession.gameId
+    ) || {
+        id:
+            activeGameSession.gameId,
+        name:
+            activeGameSession.gameName || "GAME"
+    };
+
+}
+
+
+function activeSessionIsBackground() {
+
+    return activeGameSession?.state ===
+        GameSessionState.BACKGROUND;
+
+}
+
+
+function activeSessionIsForeground() {
+
+    return activeGameSession?.state ===
+        GameSessionState.RUNNING_FOREGROUND ||
+        activeGameSession?.state ===
+        GameSessionState.RUNNING;
+
+}
+
+
+function selectedGameHasBackgroundSession(game) {
+
+    return Boolean(
+        game?.id &&
+        activeSessionIsBackground() &&
+        activeGameSession?.gameId === game.id
+    );
+
+}
+
+
+async function setGameInputRouting(enabled) {
+
+    try {
+        await invoke(
+            "set_game_input_forwarding",
+            {
+                enabled
+            }
+        );
+    }
+    catch (error) {
+        console.error(
+            "[ONA Input Routing] Could not update game forwarding:",
+            error
+        );
+    }
+
+}
+
+
+function renderActiveGameSessionUi() {
+
+    const game =
+        activeSessionGame();
+
+    document.body.classList.toggle(
+        "has-background-game",
+        activeSessionIsBackground()
+    );
+
+    if (homeContinueCard) {
+        homeContinueCard.classList.toggle(
+            "home-background-session",
+            activeSessionIsBackground()
+        );
+    }
+
+    if (!activeSessionIsBackground() || !game) {
+        return;
+    }
+
+    if (homeContinueTitle) {
+        homeContinueTitle.textContent =
+            game.name || activeGameSession.gameName || "GAME";
+    }
+
+    if (homeContinueMeta) {
+        homeContinueMeta.textContent =
+            `RUNNING / PID ${activeGameSession.pid || "UNKNOWN"}`;
+    }
+
+    if (homeContinueAction) {
+        homeContinueAction.textContent =
+            "CONTINUE GAME";
+    }
 
 }
 
@@ -758,6 +978,9 @@ function updateHomePlayer() {
 function renderHome() {
 
     const activeGame =
+        activeSessionIsBackground()
+            ? activeSessionGame()
+            :
         installedGames[selectedGameIndex] ||
         installedGames[0];
 
@@ -783,19 +1006,24 @@ function renderHome() {
 
     if (homeContinueMeta) {
         homeContinueMeta.textContent =
-            activeGame
+            activeSessionIsBackground()
+                ? `RUNNING / PID ${activeGameSession.pid || "UNKNOWN"}`
+                : activeGame
                 ? "Ready to play"
                 : "Add your first game to start playing.";
     }
 
     if (homeContinueAction) {
         homeContinueAction.textContent =
-            activeGame
+            activeSessionIsBackground()
+                ? "CONTINUE GAME"
+                : activeGame
                 ? "PLAY NOW"
                 : "GAME LIBRARY";
     }
 
     renderHomeRecentGames();
+    renderActiveGameSessionUi();
 
 }
 
@@ -1608,6 +1836,11 @@ function renderGameLibrary() {
                 game.icon
                     ? `<img class="game-icon" src="${escapeAttribute(game.icon)}" alt="">`
                     : `<div class="game-icon game-icon-placeholder">${escapeHtml(game.name?.slice(0, 2) || "ON")}</div>`;
+            const hasBackgroundSession =
+                selectedGameHasBackgroundSession(game);
+            const hasOtherBackgroundSession =
+                activeSessionIsBackground() &&
+                activeGameSession?.gameId !== game.id;
 
             card.innerHTML =
                 `${iconMarkup}
@@ -1615,9 +1848,9 @@ function renderGameLibrary() {
                     <div class="game-title">${escapeHtml(game.name || "Untitled Game")}</div>
                     <div class="game-meta">${escapeHtml(game.developer || "Unknown Developer")} / ${escapeHtml(game.version || "0.0.0")}</div>
                     <div class="game-description">${escapeHtml(game.description || "")}</div>
-                    <div class="game-state">${game.installed ? "INSTALLED" : "NOT INSTALLED"}</div>
+                    <div class="game-state">${hasBackgroundSession ? "RUNNING" : hasOtherBackgroundSession ? "ANOTHER GAME RUNNING" : game.installed ? "INSTALLED" : "NOT INSTALLED"}</div>
                 </div>
-                <div class="game-play-label">A OPEN / X OPTIONS</div>`;
+                <div class="game-play-label">${hasBackgroundSession ? "A CONTINUE / X OPTIONS" : "A OPEN / X OPTIONS"}</div>`;
 
             card.addEventListener(
                 "click",
@@ -1817,6 +2050,12 @@ function handleStartButtonState(state) {
     }
 
     if (state === "down" || state === "pressed") {
+        if (nativeGameSessionActive()) {
+            console.log(
+                "[ONA START] DOWN forwarded to game"
+            );
+        }
+
         if (startHoldTimer) {
             return true;
         }
@@ -1833,6 +2072,9 @@ function handleStartButtonState(state) {
                         true;
 
                     if (nativeGameSessionActive()) {
+                        console.log(
+                            "[ONA START] HOLD detected - opening Quick Menu"
+                        );
                         openSystemMenuDuringGame();
                     }
                 },
@@ -1857,7 +2099,7 @@ function handleStartButtonState(state) {
 
         if (nativeGameSessionActive()) {
             console.log(
-                "[ONA Input] START short during game left to native game."
+                "[ONA START] SHORT released/forwarded"
             );
             return true;
         }
@@ -2755,7 +2997,26 @@ async function launchSelectedGame() {
         return;
     }
 
+    if (selectedGameHasBackgroundSession(game)) {
+        await continueActiveGameSession();
+        return;
+    }
+
+    if (
+        activeSessionIsBackground() &&
+        activeGameSession?.gameId !== game.id
+    ) {
+        openAnotherGameRunningPrompt(game);
+        return;
+    }
+
     setUiOperation("launching");
+    setGameSessionState(
+        GameSessionState.LAUNCHING
+    );
+    setPresentationOwner(
+        PresentationOwner.ONA_TRANSITION_GUARD
+    );
     setConsolePresentationState(
         ConsolePresentationState.PREPARING
     );
@@ -2765,6 +3026,21 @@ async function launchSelectedGame() {
         game.name,
         "Preparing console presentation."
     );
+    console.log(
+        "[ONA Presentation] owner ONA_SHELL -> ONA_TRANSITION_GUARD"
+    );
+
+    try {
+        await invoke(
+            "show_presentation_guard"
+        );
+    }
+    catch (error) {
+        console.error(
+            "[ONA Presentation] Guard could not be raised before spawn:",
+            error
+        );
+    }
 
     console.log(
         "[ONA Presentation] State=PREPARING game=",
@@ -2801,6 +3077,9 @@ async function launchSelectedGame() {
             game.name,
             "Starting native game process."
         );
+        console.log(
+            "[ONA Presentation] spawning game"
+        );
 
         const status =
             await invoke(
@@ -2822,6 +3101,20 @@ async function launchSelectedGame() {
 
         runningGameId =
             game.id;
+        setActiveGameSession({
+            gameId:
+                game.id,
+            gameName:
+                game.name,
+            pid:
+                status.pid || null,
+            state:
+                GameSessionState.LAUNCHING,
+            presentationState:
+                ConsolePresentationState.LAUNCHING,
+            startedAt:
+                Date.now()
+        });
 
         if (libraryStatus) {
             libraryStatus.textContent =
@@ -2854,6 +3147,11 @@ async function launchSelectedGame() {
                             5000
                     }
                 );
+            if (handoff.gameReady) {
+                console.log(
+                    "[ONA Presentation] GAME_READY received"
+                );
+            }
 
             showGameLifecycleOverlay(
                 handoff.presentationValid && handoff.gameReady
@@ -2886,11 +3184,31 @@ async function launchSelectedGame() {
                         : 280
                 );
 
+                clearGameLifecycleOverlay();
+
                 await invoke(
                     "prepare_shell_for_game"
                 );
+                await setGameInputRouting(true);
 
                 setUiOperation("running");
+                setGameSessionState(
+                    GameSessionState.RUNNING_FOREGROUND
+                );
+                setPresentationOwner(
+                    PresentationOwner.GAME
+                );
+                updateActiveGameSession({
+                    state:
+                        GameSessionState.RUNNING_FOREGROUND,
+                    presentationState:
+                        ConsolePresentationState.RUNNING,
+                    pid:
+                        status.pid
+                });
+                console.log(
+                    "[ONA Presentation] guard -> GAME"
+                );
                 currentState =
                     ONA_STATE.GAME_RUNNING;
                 setConsolePresentationState(
@@ -2903,6 +3221,9 @@ async function launchSelectedGame() {
                 setConsolePresentationState(
                     ConsolePresentationState.FAILED
                 );
+                setGameSessionState(
+                    GameSessionState.FAILED
+                );
                 await rollbackFailedLaunch(
                     game,
                     "HANDOFF_NOT_SAFE",
@@ -2913,6 +3234,13 @@ async function launchSelectedGame() {
         else {
             hideGameLifecycleOverlay();
             setUiOperation("idle");
+            setActiveGameSession(null);
+            setGameSessionState(
+                GameSessionState.IDLE
+            );
+            setPresentationOwner(
+                PresentationOwner.ONA_SHELL
+            );
             setConsolePresentationState(
                 ConsolePresentationState.IDLE
             );
@@ -2942,6 +3270,9 @@ async function launchSelectedGame() {
         setConsolePresentationState(
             ConsolePresentationState.FAILED
         );
+        setGameSessionState(
+            GameSessionState.FAILED
+        );
 
         await rollbackFailedLaunch(game);
 
@@ -2960,6 +3291,12 @@ async function rollbackFailedLaunch(game, reason = "LAUNCH_FAILED", diagnostics 
         }
     );
 
+    showPresentationGuard(
+        "RETURNING",
+        game.name,
+        "Cancelling launch and restoring ONA."
+    );
+
     try {
         await invoke(
             "terminate_running_game"
@@ -2974,8 +3311,12 @@ async function rollbackFailedLaunch(game, reason = "LAUNCH_FAILED", diagnostics 
 
     runningGameId =
         null;
+    setActiveGameSession(null);
 
     setUiOperation("idle");
+    setGameSessionState(
+        GameSessionState.RETURNING
+    );
 
     try {
         await invoke(
@@ -3015,6 +3356,16 @@ async function rollbackFailedLaunch(game, reason = "LAUNCH_FAILED", diagnostics 
     hideGameLifecycleOverlay();
     setConsolePresentationState(
         ConsolePresentationState.IDLE
+    );
+    setGameSessionState(
+        GameSessionState.IDLE
+    );
+    setPresentationOwner(
+        PresentationOwner.ONA_SHELL
+    );
+    await invoke("release_presentation_guard").catch(
+        (error) =>
+            console.warn("[ONA Presentation] Could not release guard:", error)
     );
 
 }
@@ -3107,6 +3458,55 @@ function hideGameLifecycleOverlay() {
 }
 
 
+function clearGameLifecycleOverlay() {
+
+    hideGameLifecycleOverlay();
+
+    if (gameLifecycleTitle) {
+        gameLifecycleTitle.textContent =
+            "";
+    }
+
+    if (gameLifecycleName) {
+        gameLifecycleName.textContent =
+            "";
+    }
+
+    if (gameLifecycleStatus) {
+        gameLifecycleStatus.textContent =
+            "";
+    }
+
+    if (gameLifecycleDetails) {
+        gameLifecycleDetails.hidden =
+            true;
+        gameLifecycleDetails.textContent =
+            "";
+    }
+
+}
+
+
+function showPresentationGuard(title = "RETURNING", gameName = "GAME", status = "Restoring ONA presentation.") {
+
+    setPresentationOwner(
+        PresentationOwner.ONA_TRANSITION_GUARD
+    );
+    setConsolePresentationState(
+        ConsolePresentationState.RETURNING
+    );
+    showGameLifecycleOverlay(
+        title,
+        gameName,
+        status
+    );
+    console.log(
+        "[ONA Presentation] Windows exposure prevented"
+    );
+
+}
+
+
 async function requestOnaExit() {
 
     if (uiBusy()) {
@@ -3163,10 +3563,24 @@ async function closeOnaOwnedRuntimeAndExit() {
     try {
 
         setUiOperation("shutdown");
+        await setGameInputRouting(false);
+
+        if (activeGameSession?.pid || runningGameId) {
+            showPresentationGuard(
+                "RETURNING",
+                activeSessionGame()?.name || "GAME",
+                "Closing active game session before exiting ONA."
+            );
+            await invoke("show_presentation_guard").catch(
+                (error) =>
+                    console.error("[ONA Shutdown] Guard failed before exit:", error)
+            );
+        }
 
         await invoke(
             "terminate_running_game"
         );
+        setActiveGameSession(null);
 
         const appWindow =
             tauri
@@ -3212,6 +3626,50 @@ function startRunningGameMonitor(game) {
                             "running_game_status"
                         );
 
+                    const lifecycleStatus =
+                        await invoke(
+                            "game_lifecycle_bridge_status"
+                        ).catch(
+                            () =>
+                                null
+                        );
+
+                    if (
+                        lifecycleStatus?.gameExiting &&
+                        presentationOwner === PresentationOwner.GAME
+                    ) {
+                        console.log(
+                            "[ONA Presentation] GAME_EXITING received"
+                        );
+                        console.log(
+                            "[ONA Session] GAME_EXITING received - activating transition guard"
+                        );
+                        setUiOperation("restoring");
+                        setGameSessionState(
+                            GameSessionState.RETURNING
+                        );
+                        showPresentationGuard(
+                            "RETURNING",
+                            game.name,
+                            "Game session is ending."
+                        );
+
+                        try {
+                            await invoke(
+                                "show_presentation_guard"
+                            );
+                            await invoke(
+                                "restore_shell_after_game"
+                            );
+                        }
+                        catch (error) {
+                            console.error(
+                                "[ONA Session] Could not activate guard during game exit:",
+                                error
+                            );
+                        }
+                    }
+
                     if (
                         status.state !== "running" ||
                         status.gameId !== game.id
@@ -3224,9 +3682,36 @@ function startRunningGameMonitor(game) {
                         clearInterval(runningGamePollTimer);
                         runningGamePollTimer =
                             null;
+
+                        const wasBackground =
+                            activeSessionIsBackground();
+
+                        setActiveGameSession(null);
                         runningGameId =
                             null;
+                        await setGameInputRouting(false);
+
+                        if (wasBackground) {
+                            setGameSessionState(
+                                GameSessionState.EXITED
+                            );
+                            setGameSessionState(
+                                GameSessionState.IDLE
+                            );
+                            renderHome();
+                            renderGameLibrary();
+                            return;
+                        }
+
                         setUiOperation("restoring");
+                        setGameSessionState(
+                            GameSessionState.RETURNING
+                        );
+                        showPresentationGuard(
+                            "RETURNING",
+                            game.name,
+                            "Game session ended."
+                        );
 
                         await restoreShellAfterGame(game);
 
@@ -3252,6 +3737,9 @@ async function restoreShellAfterGame(game) {
 
     setConsolePresentationState(
         ConsolePresentationState.RETURNING
+    );
+    setPresentationOwner(
+        PresentationOwner.ONA_TRANSITION_GUARD
     );
 
     try {
@@ -3306,6 +3794,16 @@ async function restoreShellAfterGame(game) {
     setUiOperation("idle");
     setConsolePresentationState(
         ConsolePresentationState.IDLE
+    );
+    setGameSessionState(
+        GameSessionState.IDLE
+    );
+    setPresentationOwner(
+        PresentationOwner.ONA_SHELL
+    );
+    await invoke("release_presentation_guard").catch(
+        (error) =>
+            console.warn("[ONA Presentation] Could not release guard:", error)
     );
     hideGameLifecycleOverlay();
 
@@ -3364,10 +3862,43 @@ function openGameOptions() {
         true;
 
     gameOptionsMode =
-        "menu";
+        selectedGameHasBackgroundSession(game)
+            ? "background-session"
+            : "menu";
 
     selectedGameOptionIndex =
         0;
+
+    renderGameOptions();
+
+    gameOptionsOverlay
+        ?.classList
+        .add("visible");
+
+}
+
+
+function openAnotherGameRunningPrompt(game) {
+
+    pendingPlayAfterCloseGame =
+        game;
+
+    selectedOptionsGame =
+        game;
+
+    gameOptionsOpen =
+        true;
+
+    gameOptionsMode =
+        "another-game-running";
+
+    selectedGameOptionIndex =
+        0;
+
+    if (gameOptionsTitle) {
+        gameOptionsTitle.textContent =
+            "ANOTHER GAME IS RUNNING";
+    }
 
     renderGameOptions();
 
@@ -3406,7 +3937,9 @@ function renderGameOptions() {
 
     if (gameOptionsTitle) {
         gameOptionsTitle.textContent =
-            game?.name || "GAME";
+            gameOptionsMode === "another-game-running"
+                ? "ANOTHER GAME IS RUNNING"
+                : game?.name || "GAME";
     }
 
     if (gameOptionsDetails) {
@@ -3425,6 +3958,23 @@ function renderGameOptions() {
     if (gameOptionsMode === "confirm-uninstall") {
         gameOptionsStatus.textContent =
             "The game will be removed from this ONA system.";
+        gameOptionsOverlay
+            ?.classList
+            .add("confirming");
+        return;
+    }
+
+    if (gameOptionsMode === "background-session") {
+        gameOptionsStatus.textContent =
+            "RUNNING";
+        return;
+    }
+
+    if (gameOptionsMode === "another-game-running") {
+        const currentGame =
+            activeSessionGame();
+        gameOptionsStatus.textContent =
+            `${currentGame?.name || "A game"} is currently running. Starting ${game?.name || "this game"} will close the current game.`;
         gameOptionsOverlay
             ?.classList
             .add("confirming");
@@ -3468,6 +4018,46 @@ function gameOptionsMenuItems() {
                     "confirm-uninstall",
                 label:
                     "UNINSTALL GAME"
+            }
+        ];
+    }
+
+    if (gameOptionsMode === "background-session") {
+        return [
+            {
+                id:
+                    "continue-game",
+                label:
+                    "CONTINUE GAME"
+            },
+            {
+                id:
+                    "close-game",
+                label:
+                    "CLOSE GAME"
+            },
+            {
+                id:
+                    "back",
+                label:
+                    "BACK"
+            }
+        ];
+    }
+
+    if (gameOptionsMode === "another-game-running") {
+        return [
+            {
+                id:
+                    "close-and-play",
+                label:
+                    "CLOSE & PLAY"
+            },
+            {
+                id:
+                    "cancel",
+                label:
+                    "CANCEL"
             }
         ];
     }
@@ -3561,7 +4151,11 @@ function navigateGameOptions(direction) {
 
     if (
         !gameOptionsOpen ||
-        gameOptionsMode !== "menu"
+        (
+            gameOptionsMode !== "menu" &&
+            gameOptionsMode !== "background-session" &&
+            gameOptionsMode !== "another-game-running"
+        )
     ) {
         return;
     }
@@ -3625,6 +4219,57 @@ async function activateGameOptions() {
         return;
     }
 
+    if (gameOptionsMode === "background-session") {
+        const selectedAction =
+            gameOptionsMenuItems()[selectedGameOptionIndex]?.id ||
+            "continue-game";
+
+        if (selectedAction === "continue-game") {
+            closeGameOptions();
+            await continueActiveGameSession();
+            return;
+        }
+
+        if (selectedAction === "close-game") {
+            await closeActiveGameSessionAndReturnTo(ONA_STATE.GAME_LIBRARY);
+            closeGameOptions();
+            return;
+        }
+
+        closeGameOptions();
+        return;
+    }
+
+    if (gameOptionsMode === "another-game-running") {
+        const selectedAction =
+            gameOptionsMenuItems()[selectedGameOptionIndex]?.id ||
+            "cancel";
+
+        if (selectedAction === "close-and-play") {
+            const gameToLaunch =
+                pendingPlayAfterCloseGame;
+            closeGameOptions();
+            await closeActiveGameSessionAndReturnTo(ONA_STATE.GAME_LIBRARY);
+            pendingPlayAfterCloseGame =
+                null;
+
+            if (gameToLaunch?.id) {
+                selectedGameIndex =
+                    installedGames.findIndex(
+                        (game) =>
+                            game.id === gameToLaunch.id
+                    );
+                await launchSelectedGame();
+            }
+            return;
+        }
+
+        pendingPlayAfterCloseGame =
+            null;
+        closeGameOptions();
+        return;
+    }
+
     if (gameOptionsMode === "confirm-uninstall") {
         await uninstallSelectedOptionsGame();
         return;
@@ -3668,6 +4313,7 @@ function backFromGameOptions() {
 
     if (
         gameOptionsMode === "confirm-uninstall" ||
+        gameOptionsMode === "another-game-running" ||
         gameOptionsMode === "error"
     ) {
         gameOptionsMode =
@@ -3675,6 +4321,11 @@ function backFromGameOptions() {
         selectedGameOptionIndex =
             0;
         renderGameOptions();
+        return;
+    }
+
+    if (gameOptionsMode === "background-session") {
+        closeGameOptions();
         return;
     }
 
@@ -4326,11 +4977,14 @@ function controllerConnected(
     controllerInfo = {}
 ) {
 
+    const playerId =
+        Number(controllerInfo.playerId || 1);
+
     if (addingController) {
         playerCountValue =
             Math.max(
-                playerCountValue + 1,
-                2
+                playerCountValue,
+                playerId
             );
     }
 
@@ -4338,7 +4992,7 @@ function controllerConnected(
         playerCountValue =
             Math.max(
                 playerCountValue,
-                1
+                playerId
             );
     }
 
@@ -4359,7 +5013,7 @@ function controllerConnected(
     if (connectionText) {
 
         connectionText.textContent =
-            "PLAYER 1 CONNECTED";
+            `PLAYER ${playerId} CONNECTED`;
 
     }
 
@@ -5664,6 +6318,11 @@ function openSystemMenu(context = {}) {
         .classList
         .add("mouse-enabled");
 
+    document.body.classList.toggle(
+        "game-system-overlay",
+        Boolean(options.gameOverlay)
+    );
+
 
     systemMenu
         ?.querySelectorAll(".system-menu-item")
@@ -5689,12 +6348,15 @@ async function openSystemMenuDuringGame() {
     }
 
     console.log(
-        "[ONA Quick Menu] Opening over running native game."
+        "[ONA QuickMenu] Entered from running game"
     );
+
+    clearGameLifecycleOverlay();
+    await setGameInputRouting(false);
 
     try {
         await invoke(
-            "restore_shell_after_game"
+            "show_system_overlay_over_game"
         );
     }
     catch (error) {
@@ -5705,6 +6367,16 @@ async function openSystemMenuDuringGame() {
     }
 
     setUiOperation("running");
+    setConsolePresentationState(
+        ConsolePresentationState.RUNNING
+    );
+    setGameSessionState(
+        GameSessionState.SYSTEM_OVERLAY
+    );
+    setPresentationOwner(
+        PresentationOwner.ONA_SYSTEM_OVERLAY
+    );
+    clearGameLifecycleOverlay();
     openSystemMenu({
         returnState:
             ONA_STATE.GAME_RUNNING,
@@ -5740,24 +6412,51 @@ async function closeSystemMenu(targetState = stateBeforeSystemMenu) {
         .classList
         .remove("mouse-enabled");
 
+    document.body
+        .classList
+        .remove("game-system-overlay");
+
 
     if (targetState === ONA_STATE.GAME_RUNNING && runningGameId) {
         console.log(
-            "[ONA Quick Menu] Closing overlay and returning focus to native game."
+            "[ONA QuickMenu] Returning directly to running game"
         );
 
         currentState =
             ONA_STATE.GAME_RUNNING;
 
         setUiOperation("running");
+        setConsolePresentationState(
+            ConsolePresentationState.RUNNING
+        );
+        setGameSessionState(
+            GameSessionState.RUNNING
+        );
+        setPresentationOwner(
+            PresentationOwner.GAME
+        );
+        clearGameLifecycleOverlay();
 
         try {
             await invoke(
                 "hide_game_cursor"
             );
             await invoke(
+                "hide_system_overlay_over_game"
+            );
+            if (activeGameSession?.pid) {
+                await invoke(
+                    "focus_running_game",
+                    {
+                        pid:
+                            activeGameSession.pid
+                    }
+                );
+            }
+            await invoke(
                 "prepare_shell_for_game"
             );
+            await setGameInputRouting(true);
         }
         catch (error) {
             console.error(
@@ -5791,12 +6490,296 @@ homeButton?.addEventListener(
     "click",
     () => {
 
+        if (nativeGameSessionActive()) {
+            backgroundActiveGameSessionAndReturnHome();
+            return;
+        }
+
         closeSystemMenu(
             ONA_STATE.HOME
         );
 
     }
 );
+
+
+async function backgroundActiveGameSessionAndReturnHome() {
+
+    const game =
+        activeSessionGame();
+
+    console.log(
+        "[ONA Session] HOME requested"
+    );
+
+    systemMenu
+        ?.classList
+        .remove("visible");
+
+    document.body
+        .classList
+        .remove("system-menu-open");
+
+    document.body
+        .classList
+        .remove("mouse-enabled");
+
+    setGameSessionState(
+        GameSessionState.BACKGROUND
+    );
+    showPresentationGuard(
+        "RETURNING",
+        game?.name || "GAME",
+        "Returning to ONA Home."
+    );
+    console.log(
+        "[ONA Presentation] GAME -> guard"
+    );
+
+    try {
+        await invoke(
+            "restore_shell_after_game"
+        );
+        console.log(
+            "[ONA Presentation] shell restored behind guard"
+        );
+    }
+    catch (error) {
+        console.error(
+            "[ONA Session] Could not prepare ONA Home over game:",
+            error
+        );
+    }
+
+    await setGameInputRouting(false);
+
+    updateActiveGameSession({
+        state:
+            GameSessionState.BACKGROUND,
+        presentationState:
+            ConsolePresentationState.IDLE
+    });
+
+    setUiOperation(
+        "idle"
+    );
+
+    await loadGameLibrary();
+
+    transitionTo(
+        ONA_STATE.HOME
+    );
+
+    clearGameLifecycleOverlay();
+    setConsolePresentationState(
+        ConsolePresentationState.IDLE
+    );
+    setGameSessionState(
+        GameSessionState.BACKGROUND
+    );
+    setPresentationOwner(
+        PresentationOwner.ONA_SHELL
+    );
+    await invoke("release_presentation_guard").catch(
+        (error) =>
+            console.warn("[ONA Presentation] Could not release guard:", error)
+    );
+    console.log(
+        "[ONA Presentation] guard -> ONA_SHELL"
+    );
+
+}
+
+
+async function closeActiveGameSessionAndReturnTo(targetState = ONA_STATE.HOME) {
+
+    const game =
+        activeSessionGame();
+
+    if (!activeGameSession?.pid && !runningGameId) {
+        setActiveGameSession(null);
+        transitionTo(targetState);
+        return;
+    }
+
+    console.log(
+        "[ONA Session] graceful shutdown requested"
+    );
+
+    showPresentationGuard(
+        "RETURNING",
+        game?.name || "GAME",
+        "Closing game session."
+    );
+    await invoke("show_presentation_guard").catch(
+        (error) =>
+            console.error("[ONA Presentation] Guard failed before close:", error)
+    );
+    await setGameInputRouting(false);
+    setGameSessionState(
+        GameSessionState.STOPPING
+    );
+
+    try {
+        const status =
+            await invoke(
+                "terminate_running_game"
+            );
+
+        console.log(
+            "[ONA Session] process exited code=",
+            status?.exitCode ?? "unknown"
+        );
+    }
+    catch (error) {
+        console.error(
+            "[ONA Session] Game shutdown failed:",
+            error
+        );
+    }
+
+    if (runningGamePollTimer) {
+        clearInterval(runningGamePollTimer);
+        runningGamePollTimer =
+            null;
+    }
+
+    setActiveGameSession(null);
+    runningGameId =
+        null;
+    setUiOperation("idle");
+    setGameSessionState(
+        GameSessionState.IDLE
+    );
+
+    await loadGameLibrary();
+
+    transitionTo(
+        targetState
+    );
+
+    clearGameLifecycleOverlay();
+    setConsolePresentationState(
+        ConsolePresentationState.IDLE
+    );
+    setPresentationOwner(
+        PresentationOwner.ONA_SHELL
+    );
+    await invoke("release_presentation_guard").catch(
+        (error) =>
+            console.warn("[ONA Presentation] Could not release guard:", error)
+    );
+
+}
+
+
+async function continueActiveGameSession() {
+
+    if (!activeGameSession?.pid) {
+        setActiveGameSession(null);
+        await loadGameLibrary();
+        return;
+    }
+
+    const game =
+        activeSessionGame();
+    const pidBefore =
+        activeGameSession.pid;
+
+    console.log(
+        `[ONA Session] CONTINUE requested pid=${pidBefore}`
+    );
+
+    showPresentationGuard(
+        "RETURNING",
+        game?.name || "GAME",
+        "Continuing game session."
+    );
+
+    try {
+        await invoke(
+            "show_presentation_guard"
+        );
+    }
+    catch (error) {
+        console.error(
+            "[ONA Presentation] Guard could not be raised before continue:",
+            error
+        );
+    }
+
+    const status =
+        await invoke(
+            "running_game_status"
+        );
+
+    if (
+        status.state !== "running" ||
+        status.pid !== pidBefore ||
+        status.gameId !== activeGameSession.gameId
+    ) {
+        console.warn(
+            "[ONA Session] Background session is stale:",
+            status
+        );
+        setActiveGameSession(null);
+        runningGameId =
+            null;
+        await setGameInputRouting(false);
+        await loadGameLibrary();
+        clearGameLifecycleOverlay();
+        transitionTo(
+            ONA_STATE.GAME_LIBRARY
+        );
+        return;
+    }
+
+    await invoke(
+        "focus_running_game",
+        {
+            pid:
+                pidBefore
+        }
+    ).catch(
+        (error) =>
+            console.warn("[ONA Presentation] Existing game foreground best-effort failed:", error)
+    );
+
+    await waitForTransition(220);
+    clearGameLifecycleOverlay();
+
+    await invoke(
+        "prepare_shell_for_game"
+    );
+    await setGameInputRouting(true);
+
+    setUiOperation("running");
+    currentState =
+        ONA_STATE.GAME_RUNNING;
+    setConsolePresentationState(
+        ConsolePresentationState.RUNNING
+    );
+    setGameSessionState(
+        GameSessionState.RUNNING_FOREGROUND
+    );
+    setPresentationOwner(
+        PresentationOwner.GAME
+    );
+    updateActiveGameSession({
+        state:
+            GameSessionState.RUNNING_FOREGROUND,
+        presentationState:
+            ConsolePresentationState.RUNNING
+    });
+
+    console.log(
+        `[ONA Session] CONTINUE pid before=${pidBefore} after=${activeGameSession.pid}`
+    );
+    console.log(
+        "[ONA Presentation] guard -> GAME"
+    );
+
+}
 
 quickControllersButton?.addEventListener(
     "click",
@@ -5889,7 +6872,12 @@ window.onaDebugConnect =
 
 tauri.event.listen(
     "controller-connected",
-    () => controllerConnected({ name: "ONA Controller" })
+    (event) => controllerConnected({
+        name:
+            "ONA Controller",
+        playerId:
+            Number(event.payload || 1)
+    })
 );
 
 tauri.event.listen(
@@ -6134,12 +7122,15 @@ tauri.event.listen(
                 return;
             }
 
-            if (
-                button === "X"
-            ) {
-                requestGameUninstallConfirmation();
+        if (
+            button === "X"
+        ) {
+            if (gameOptionsMode !== "menu") {
                 return;
             }
+            requestGameUninstallConfirmation();
+            return;
+        }
 
             if (
                 button === "B"
@@ -6307,6 +7298,11 @@ tauri.event.listen(
                         selected.dataset.action
                         === "play"
                     ) {
+
+                        if (activeSessionIsBackground()) {
+                            continueActiveGameSession();
+                            return;
+                        }
 
                         transitionTo(
                             ONA_STATE.GAME_LIBRARY
