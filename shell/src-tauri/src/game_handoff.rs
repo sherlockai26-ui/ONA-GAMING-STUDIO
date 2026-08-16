@@ -191,6 +191,20 @@ pub fn focus_process_window(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
+pub fn minimize_process_window(pid: u32) -> bool {
+    platform_visible_window_for_pid(pid)
+        .as_ref()
+        .map(platform_minimize_window)
+        .unwrap_or(false)
+}
+
+pub fn restore_process_window(pid: u32) -> bool {
+    platform_visible_window_for_pid(pid)
+        .as_ref()
+        .map(platform_restore_window)
+        .unwrap_or(false)
+}
+
 #[cfg(windows)]
 pub fn log_visible_windows(reason: &str) {
     use windows::Win32::{
@@ -575,6 +589,33 @@ fn platform_try_foreground_window(window: &WindowBounds) -> bool {
 
 #[cfg(not(windows))]
 fn platform_try_foreground_window(_window: &WindowBounds) -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn platform_minimize_window(window: &WindowBounds) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_MINIMIZE};
+
+    unsafe { ShowWindow(window.hwnd, SW_MINIMIZE).as_bool() }
+}
+
+#[cfg(not(windows))]
+fn platform_minimize_window(_window: &WindowBounds) -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn platform_restore_window(window: &WindowBounds) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_RESTORE};
+
+    unsafe {
+        let _ = ShowWindow(window.hwnd, SW_RESTORE);
+        SetForegroundWindow(window.hwnd).as_bool()
+    }
+}
+
+#[cfg(not(windows))]
+fn platform_restore_window(_window: &WindowBounds) -> bool {
     false
 }
 

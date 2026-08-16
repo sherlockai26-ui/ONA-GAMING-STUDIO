@@ -356,6 +356,8 @@ const GameSessionState = {
         "Background",
     SYSTEM_OVERLAY:
         "SystemOverlay",
+    MINIMIZED:
+        "Minimized",
     STOPPING:
         "Stopping",
     EXITED:
@@ -374,7 +376,9 @@ const PresentationOwner = {
     GAME:
         "GAME",
     ONA_SYSTEM_OVERLAY:
-        "ONA_SYSTEM_OVERLAY"
+        "ONA_SYSTEM_OVERLAY",
+    ONA_MINIMIZED:
+        "ONA_MINIMIZED"
 };
 
 let consolePresentationState =
@@ -385,6 +389,12 @@ let gameSessionState =
 
 let presentationOwner =
     PresentationOwner.ONA_SHELL;
+
+let gameInputForwardingEnabled =
+    false;
+
+let presentationInvariantWarningsSuppressed =
+    false;
 
 
 // =========================================================
@@ -453,6 +463,21 @@ let runningGameId =
 
 let activeGameSession =
     null;
+
+let preMinimizePresentationState =
+    null;
+
+let restoringConsoleExperience =
+    false;
+
+let presentationTransitionId =
+    0;
+
+let nativeShellMinimizeRestore =
+    false;
+
+const presentationWatchdogWarnings =
+    new Set();
 
 let pendingPlayAfterCloseGame =
     null;
@@ -560,6 +585,8 @@ function setPresentationOwner(owner) {
     presentationOwner =
         owner;
 
+    assertPresentationInvariants();
+
 }
 
 
@@ -652,12 +679,266 @@ async function setGameInputRouting(enabled) {
                 enabled
             }
         );
+        gameInputForwardingEnabled =
+            Boolean(enabled);
+        assertPresentationInvariants();
     }
     catch (error) {
         console.error(
             "[ONA Input Routing] Could not update game forwarding:",
             error
         );
+    }
+
+}
+
+
+function nextPresentationTransition(reason) {
+
+    presentationTransitionId += 1;
+    console.log(
+        `[ONA Presentation] transition=${presentationTransitionId} reason=${reason}`
+    );
+    return presentationTransitionId;
+
+}
+
+
+function presentationTransitionCurrent(id) {
+
+    return id === presentationTransitionId;
+
+}
+
+
+async function recoverPresentationToShell(reason, game = null) {
+
+    console.error(
+        "[ONA Presentation] recovery requested",
+        reason
+    );
+    await setGameInputRouting(false);
+    await invoke("restore_shell_window_presentation").catch(
+        (error) =>
+            console.error("[ONA Presentation] Shell recovery failed:", error)
+    );
+    await invoke("release_presentation_guard").catch(
+        (error) =>
+            console.error("[ONA Presentation] Guard recovery failed:", error)
+    );
+    clearGameLifecycleOverlay();
+    setUiOperation("idle");
+    setConsolePresentationState(
+        ConsolePresentationState.IDLE
+    );
+    setGameSessionState(
+        game ? GameSessionState.BACKGROUND : GameSessionState.IDLE
+    );
+    setPresentationOwner(
+        PresentationOwner.ONA_SHELL
+    );
+
+}
+
+
+async function finalizeSafeHandoffToGame(game, pid, sessionState = GameSessionState.RUNNING_FOREGROUND) {
+
+    const transitionId =
+        nextPresentationTransition("SAFE_HANDOFF_FINALIZE");
+
+    console.log(
+        "[ONA Presentation] finalizing safe handoff"
+    );
+
+    clearGameLifecycleOverlay();
+    await invoke(
+        "prepare_shell_for_game"
+    );
+
+    if (!presentationTransitionCurrent(transitionId)) {
+        console.warn(
+            "[ONA Presentation] stale handoff finalization ignored"
+        );
+        return false;
+    }
+
+    console.log(
+        "[ONA Presentation] shell hidden confirmed"
+    );
+
+    try {
+        await invoke(
+            "release_presentation_guard"
+        );
+    }
+    catch (error) {
+        await recoverPresentationToShell(
+            `GUARD_RELEASE_AFTER_HANDOFF_FAILED: ${error}`,
+            game
+        );
+        return false;
+    }
+
+    if (!presentationTransitionCurrent(transitionId)) {
+        console.warn(
+            "[ONA Presentation] stale guard release ignored"
+        );
+        return false;
+    }
+
+    console.log(
+        "[ONA Presentation] guard hidden confirmed"
+    );
+    console.log(
+        "[ONA Presentation] game visible confirmed"
+    );
+
+    setUiOperation("running");
+    setGameSessionState(
+        sessionState
+    );
+    updateActiveGameSession({
+        state:
+            sessionState,
+        presentationState:
+            ConsolePresentationState.RUNNING,
+        pid
+    });
+    currentState =
+        ONA_STATE.GAME_RUNNING;
+    setConsolePresentationState(
+        ConsolePresentationState.RUNNING
+    );
+    presentationInvariantWarningsSuppressed =
+        true;
+    await setGameInputRouting(true);
+    setPresentationOwner(
+        PresentationOwner.GAME
+    );
+    presentationInvariantWarningsSuppressed =
+        false;
+    assertPresentationInvariants();
+    console.log(
+        "[ONA Presentation] owner=GAME"
+    );
+    return true;
+
+}
+
+
+function assertPresentationInvariants() {
+
+    if (presentationInvariantWarningsSuppressed) {
+        return;
+    }
+
+    const invalid =
+        [];
+
+    if (
+        presentationOwner === PresentationOwner.GAME &&
+        !gameInputForwardingEnabled
+    ) {
+        invalid.push("GAME owner with forwarding paused");
+    }
+
+    if (
+        presentationOwner !== PresentationOwner.GAME &&
+        gameInputForwardingEnabled
+    ) {
+        invalid.push(`${presentationOwner} owner with forwarding enabled`);
+    }
+
+    if (
+        presentationOwner === PresentationOwner.ONA_SHELL &&
+        document.body.classList.contains("game-system-overlay")
+    ) {
+        invalid.push("ONA_SHELL with system overlay class");
+    }
+
+    if (
+        presentationOwner === PresentationOwner.ONA_MINIMIZED &&
+        systemMenu?.classList.contains("visible")
+    ) {
+        invalid.push("ONA_MINIMIZED with Quick Menu visible");
+    }
+
+    if (invalid.length > 0) {
+        console.warn(
+            "[ONA State] INVALID PRESENTATION COMBINATION",
+            invalid.join("; "),
+            {
+                presentationOwner,
+                gameSessionState,
+                consolePresentationState,
+                gameInputForwardingEnabled
+            }
+        );
+    }
+
+}
+
+
+async function runPresentationWatchdog() {
+
+    if (
+        ![
+            PresentationOwner.GAME,
+            PresentationOwner.ONA_SHELL,
+            PresentationOwner.ONA_SYSTEM_OVERLAY
+        ].includes(presentationOwner)
+    ) {
+        return;
+    }
+
+    const guard =
+        await invoke("presentation_guard_native_status").catch(
+            () =>
+                null
+        );
+
+    if (!guard) {
+        return;
+    }
+
+    const violations =
+        [];
+
+    if (
+        presentationOwner === PresentationOwner.GAME &&
+        (guard.visible || guard.alwaysOnTop || !gameInputForwardingEnabled)
+    ) {
+        violations.push(
+            `GAME guardVisible=${guard.visible} guardTopmost=${guard.alwaysOnTop} forwarding=${gameInputForwardingEnabled}`
+        );
+    }
+
+    if (
+        presentationOwner === PresentationOwner.ONA_SHELL &&
+        (guard.visible || guard.alwaysOnTop || gameInputForwardingEnabled || document.body.classList.contains("game-system-overlay"))
+    ) {
+        violations.push(
+            `ONA_SHELL guardVisible=${guard.visible} guardTopmost=${guard.alwaysOnTop} forwarding=${gameInputForwardingEnabled}`
+        );
+    }
+
+    if (
+        presentationOwner === PresentationOwner.ONA_SYSTEM_OVERLAY &&
+        (guard.visible || guard.alwaysOnTop || gameInputForwardingEnabled)
+    ) {
+        violations.push(
+            `ONA_SYSTEM_OVERLAY guardVisible=${guard.visible} guardTopmost=${guard.alwaysOnTop} forwarding=${gameInputForwardingEnabled}`
+        );
+    }
+
+    for (const violation of violations) {
+        if (!presentationWatchdogWarnings.has(violation)) {
+            presentationWatchdogWarnings.add(violation);
+            console.warn(
+                "[ONA Presentation Watchdog] invariant violation",
+                violation
+            );
+        }
     }
 
 }
@@ -771,6 +1052,8 @@ let settingsData = {
     storage:
         null,
     system:
+        null,
+    connectivity:
         null
 };
 
@@ -1224,6 +1507,13 @@ async function loadSettingsData() {
             })
             .catch((error) =>
                 console.error("[ONA Settings] System info failed:", error)
+            ),
+        invoke("local_connectivity_status")
+            .then((connectivity) => {
+                settingsData.connectivity = connectivity;
+            })
+            .catch((error) =>
+                console.error("[ONA Settings] Connectivity info failed:", error)
             )
     ]);
 
@@ -1344,7 +1634,12 @@ function renderSettingsPanel() {
         network:
             settingRow("CORE", "ONLINE", "", true) +
             settingRow("CONTROLLER", playerCountValue > 0 ? "CONNECTED" : "WAITING", "", true) +
-            settingRow("PLAYERS / CONTROLLERS", `${playerCountValue} / 10`, "", true),
+            settingRow("PLAYERS / CONTROLLERS", `${playerCountValue} / 10`, "", true) +
+            settingRow("NETWORK MODE", settingsData.connectivity?.networkMode || "UNKNOWN", "", true) +
+            settingRow("LAN", settingsData.connectivity?.lanAvailable ? "AVAILABLE" : "NOT DETECTED", "", true) +
+            settingRow("LOCAL IPV4", settingsData.connectivity?.localIpv4 || "UNKNOWN", "", true) +
+            settingRow("CONTROLLER URL", settingsData.connectivity?.controllerUrl || "WAITING FOR LOCAL NETWORK", "", true) +
+            settingRow("DIRECT LOCAL", settingsData.connectivity?.directLocalActive ? "ACTIVE" : "NOT ACTIVE", "", true),
         storage:
             settingRow("ONA GAMES", `${settingsData.storage?.installedGames ?? installedGames.length} INSTALLED`, "", true) +
             settingRow("APP DATA", settingsData.storage?.appDataPath || "UNKNOWN", "", true) +
@@ -2997,6 +3292,24 @@ async function launchSelectedGame() {
         return;
     }
 
+    if (presentationOwner === PresentationOwner.ONA_SHELL) {
+        console.log(
+            "[ONA Presentation] normalizing shell before PLAY"
+        );
+        await invoke("restore_shell_window_presentation").catch(
+            (error) =>
+                console.warn("[ONA Presentation] Shell normalization before PLAY failed:", error)
+        );
+        await invoke("release_presentation_guard").catch(
+            (error) =>
+                console.warn("[ONA Presentation] Guard normalization before PLAY failed:", error)
+        );
+        document.body
+            .classList
+            .remove("game-system-overlay");
+        await setGameInputRouting(false);
+    }
+
     if (selectedGameHasBackgroundSession(game)) {
         await continueActiveGameSession();
         return;
@@ -3032,7 +3345,11 @@ async function launchSelectedGame() {
 
     try {
         await invoke(
-            "show_presentation_guard"
+            "show_presentation_guard",
+            {
+                mode:
+                    "LAUNCHING_GAME"
+            }
         );
     }
     catch (error) {
@@ -3184,38 +3501,16 @@ async function launchSelectedGame() {
                         : 280
                 );
 
-                clearGameLifecycleOverlay();
+                const finalized =
+                    await finalizeSafeHandoffToGame(
+                        game,
+                        status.pid,
+                        GameSessionState.RUNNING_FOREGROUND
+                    );
 
-                await invoke(
-                    "prepare_shell_for_game"
-                );
-                await setGameInputRouting(true);
-
-                setUiOperation("running");
-                setGameSessionState(
-                    GameSessionState.RUNNING_FOREGROUND
-                );
-                setPresentationOwner(
-                    PresentationOwner.GAME
-                );
-                updateActiveGameSession({
-                    state:
-                        GameSessionState.RUNNING_FOREGROUND,
-                    presentationState:
-                        ConsolePresentationState.RUNNING,
-                    pid:
-                        status.pid
-                });
-                console.log(
-                    "[ONA Presentation] guard -> GAME"
-                );
-                currentState =
-                    ONA_STATE.GAME_RUNNING;
-                setConsolePresentationState(
-                    ConsolePresentationState.RUNNING
-                );
-
-                startRunningGameMonitor(game);
+                if (finalized) {
+                    startRunningGameMonitor(game);
+                }
             }
             else {
                 setConsolePresentationState(
@@ -3507,6 +3802,32 @@ function showPresentationGuard(title = "RETURNING", gameName = "GAME", status = 
 }
 
 
+function waitForShellFrames(count = 2) {
+
+    return new Promise(
+        (resolve) => {
+            let remaining =
+                Math.max(1, count);
+
+            const step =
+                () => {
+                    remaining -= 1;
+
+                    if (remaining <= 0) {
+                        resolve();
+                        return;
+                    }
+
+                    window.requestAnimationFrame(step);
+                };
+
+            window.requestAnimationFrame(step);
+        }
+    );
+
+}
+
+
 async function requestOnaExit() {
 
     if (uiBusy()) {
@@ -3571,7 +3892,10 @@ async function closeOnaOwnedRuntimeAndExit() {
                 activeSessionGame()?.name || "GAME",
                 "Closing active game session before exiting ONA."
             );
-            await invoke("show_presentation_guard").catch(
+            await invoke("show_presentation_guard", {
+                mode:
+                    "RETURNING_TO_ONA"
+            }).catch(
                 (error) =>
                     console.error("[ONA Shutdown] Guard failed before exit:", error)
             );
@@ -3656,7 +3980,11 @@ function startRunningGameMonitor(game) {
 
                         try {
                             await invoke(
-                                "show_presentation_guard"
+                                "show_presentation_guard",
+                                {
+                                    mode:
+                                        "RETURNING_TO_ONA"
+                                }
                             );
                             await invoke(
                                 "restore_shell_after_game"
@@ -3727,13 +4055,27 @@ function startRunningGameMonitor(game) {
                 }
 
             },
-            800
+            120
         );
 
 }
 
 
 async function restoreShellAfterGame(game) {
+
+    showPresentationGuard(
+        "RETURNING",
+        game.name,
+        "Restoring ONA Gaming Display."
+    );
+
+    await invoke("show_presentation_guard", {
+        mode:
+            "RETURNING_TO_ONA"
+    }).catch(
+        (error) =>
+            console.error("[ONA Presentation] Guard failed before shell restore:", error)
+    );
 
     setConsolePresentationState(
         ConsolePresentationState.RETURNING
@@ -3766,14 +4108,6 @@ async function restoreShellAfterGame(game) {
         );
     }
 
-    showGameLifecycleOverlay(
-        "RETURNING",
-        game.name,
-        "Restoring ONA Gaming Display."
-    );
-
-    await waitForTransition(420);
-
     await loadGameLibrary();
 
     const gameIndex =
@@ -3790,6 +4124,8 @@ async function restoreShellAfterGame(game) {
     transitionTo(
         ONA_STATE.GAME_LIBRARY
     );
+
+    await waitForShellFrames(2);
 
     setUiOperation("idle");
     setConsolePresentationState(
@@ -6611,7 +6947,10 @@ async function closeActiveGameSessionAndReturnTo(targetState = ONA_STATE.HOME) {
         game?.name || "GAME",
         "Closing game session."
     );
-    await invoke("show_presentation_guard").catch(
+    await invoke("show_presentation_guard", {
+        mode:
+            "RETURNING_TO_ONA"
+    }).catch(
         (error) =>
             console.error("[ONA Presentation] Guard failed before close:", error)
     );
@@ -6698,7 +7037,11 @@ async function continueActiveGameSession() {
 
     try {
         await invoke(
-            "show_presentation_guard"
+            "show_presentation_guard",
+            {
+                mode:
+                    "RESUMING_GAME"
+            }
         );
     }
     catch (error) {
@@ -6746,37 +7089,19 @@ async function continueActiveGameSession() {
     );
 
     await waitForTransition(220);
-    clearGameLifecycleOverlay();
+    const finalized =
+        await finalizeSafeHandoffToGame(
+            game,
+            pidBefore,
+            GameSessionState.RUNNING_FOREGROUND
+        );
 
-    await invoke(
-        "prepare_shell_for_game"
-    );
-    await setGameInputRouting(true);
-
-    setUiOperation("running");
-    currentState =
-        ONA_STATE.GAME_RUNNING;
-    setConsolePresentationState(
-        ConsolePresentationState.RUNNING
-    );
-    setGameSessionState(
-        GameSessionState.RUNNING_FOREGROUND
-    );
-    setPresentationOwner(
-        PresentationOwner.GAME
-    );
-    updateActiveGameSession({
-        state:
-            GameSessionState.RUNNING_FOREGROUND,
-        presentationState:
-            ConsolePresentationState.RUNNING
-    });
+    if (!finalized) {
+        return;
+    }
 
     console.log(
         `[ONA Session] CONTINUE pid before=${pidBefore} after=${activeGameSession.pid}`
-    );
-    console.log(
-        "[ONA Presentation] guard -> GAME"
     );
 
 }
@@ -6797,13 +7122,436 @@ quickControllersButton?.addEventListener(
 // MINIMIZE ONA
 // =========================================================
 
+function captureConsolePresentationSnapshot() {
+
+    return {
+        currentState,
+        consolePresentationState,
+        gameSessionState,
+        presentationOwner,
+        activeGameSession:
+            activeGameSession
+                ? { ...activeGameSession }
+                : null,
+        systemMenuOpen:
+            Boolean(systemMenu?.classList.contains("visible")),
+        gameOverlay:
+            document.body.classList.contains("game-system-overlay"),
+        nativeShellMinimize:
+            false
+    };
+
+}
+
+
+async function withPresentationTransaction(work) {
+
+    presentationInvariantWarningsSuppressed =
+        true;
+
+    try {
+        return await work();
+    }
+    finally {
+        presentationInvariantWarningsSuppressed =
+            false;
+        assertPresentationInvariants();
+    }
+
+}
+
+
+async function minimizeOnaConsoleExperience() {
+
+    if (presentationOwner === PresentationOwner.ONA_MINIMIZED) {
+        await invoke("minimize_main_window");
+        return;
+    }
+
+    preMinimizePresentationState =
+        captureConsolePresentationSnapshot();
+
+    console.log(
+        `[ONA Minimize] preOwner=${preMinimizePresentationState.presentationOwner}`
+    );
+    console.log(
+        "[ONA Minimize] saved window presentation state",
+        preMinimizePresentationState
+    );
+
+    await withPresentationTransaction(async () => {
+
+        systemMenu
+            ?.classList
+            .remove("visible");
+
+        document.body
+            .classList
+            .remove("system-menu-open");
+
+        document.body
+            .classList
+            .remove("mouse-enabled");
+
+        document.body
+            .classList
+            .remove("game-system-overlay");
+
+        await setGameInputRouting(false);
+
+        const pid =
+            preMinimizePresentationState?.activeGameSession?.pid;
+
+        if (pid) {
+            await invoke(
+                "minimize_running_game",
+                {
+                    pid
+                }
+            ).catch(
+                (error) =>
+                    console.warn("[ONA Presentation] Could not minimize game window:", error)
+            );
+        }
+
+        await invoke("hide_system_overlay_over_game").catch(
+            (error) =>
+                console.warn("[ONA Presentation] Could not hide system overlay before minimize:", error)
+        );
+
+        clearGameLifecycleOverlay();
+        setPresentationOwner(
+            PresentationOwner.ONA_MINIMIZED
+        );
+        setGameSessionState(
+            GameSessionState.MINIMIZED
+        );
+
+        if (activeGameSession) {
+            updateActiveGameSession({
+                state:
+                    GameSessionState.MINIMIZED
+            });
+        }
+
+        await invoke("minimize_main_window");
+
+    });
+
+}
+
+
+async function handleNativeMainWindowMinimize() {
+
+    if (
+        presentationOwner === PresentationOwner.ONA_MINIMIZED ||
+        presentationOwner === PresentationOwner.GAME ||
+        uiOperationState === "launching" ||
+        uiOperationState === "restoring"
+    ) {
+        return;
+    }
+
+    console.log(
+        "[ONA Minimize] native event detected"
+    );
+
+    preMinimizePresentationState =
+        captureConsolePresentationSnapshot();
+    nativeShellMinimizeRestore =
+        preMinimizePresentationState.presentationOwner === PresentationOwner.ONA_SHELL;
+
+    if (nativeShellMinimizeRestore) {
+        preMinimizePresentationState.systemMenuOpen =
+            false;
+        preMinimizePresentationState.gameOverlay =
+            false;
+        preMinimizePresentationState.nativeShellMinimize =
+            true;
+        systemMenu
+            ?.classList
+            .remove("visible");
+        document.body
+            .classList
+            .remove("system-menu-open");
+        document.body
+            .classList
+            .remove("mouse-enabled");
+        document.body
+            .classList
+            .remove("game-system-overlay");
+    }
+
+    console.log(
+        `[ONA Minimize] previousOwner=${preMinimizePresentationState.presentationOwner}`
+    );
+
+    await withPresentationTransaction(async () => {
+        await invoke("release_presentation_guard").catch(
+            (error) =>
+                console.warn("[ONA Minimize] Guard release during native minimize failed:", error)
+        );
+        await setGameInputRouting(false);
+        setPresentationOwner(
+            PresentationOwner.ONA_MINIMIZED
+        );
+        setGameSessionState(
+            GameSessionState.MINIMIZED
+        );
+        console.log(
+            "[ONA Minimize] owner=ONA_MINIMIZED"
+        );
+    });
+
+}
+
+
+async function restoreOnaConsoleExperience() {
+
+    if (
+        presentationOwner !== PresentationOwner.ONA_MINIMIZED ||
+        restoringConsoleExperience
+    ) {
+        return;
+    }
+
+    restoringConsoleExperience =
+        true;
+
+    const snapshot =
+        preMinimizePresentationState;
+
+    console.log(
+        `[ONA Restore] restoring owner=${snapshot?.presentationOwner || PresentationOwner.ONA_SHELL}`
+    );
+
+    try {
+        await withPresentationTransaction(async () => {
+
+            const pid =
+                snapshot?.activeGameSession?.pid;
+
+            if (pid) {
+                await invoke(
+                    "restore_running_game",
+                    {
+                        pid
+                    }
+                ).catch(
+                    (error) =>
+                        console.warn("[ONA Presentation] Could not restore game window:", error)
+                );
+            }
+
+            if (
+                snapshot?.presentationOwner === PresentationOwner.GAME ||
+                snapshot?.gameSessionState === GameSessionState.RUNNING ||
+                snapshot?.gameSessionState === GameSessionState.RUNNING_FOREGROUND
+            ) {
+                currentState =
+                    ONA_STATE.GAME_RUNNING;
+                setUiOperation("running");
+                setConsolePresentationState(
+                    ConsolePresentationState.RUNNING
+                );
+                const restoredState =
+                    snapshot.gameSessionState === GameSessionState.RUNNING
+                        ? GameSessionState.RUNNING
+                        : GameSessionState.RUNNING_FOREGROUND;
+                setGameSessionState(
+                    restoredState
+                );
+                updateActiveGameSession({
+                    state:
+                        restoredState,
+                    presentationState:
+                        ConsolePresentationState.RUNNING
+                });
+                clearGameLifecycleOverlay();
+                await invoke("hide_system_overlay_over_game").catch(() => {});
+                await invoke("prepare_shell_for_game");
+                try {
+                    await invoke("release_presentation_guard");
+                }
+                catch (error) {
+                    await recoverPresentationToShell(
+                        `GUARD_RELEASE_AFTER_RESTORE_FAILED: ${error}`,
+                        activeSessionGame()
+                    );
+                    return;
+                }
+                console.log(
+                    "[ONA Presentation] guard hidden confirmed"
+                );
+                presentationInvariantWarningsSuppressed =
+                    true;
+                await setGameInputRouting(true);
+                setPresentationOwner(
+                    PresentationOwner.GAME
+                );
+                presentationInvariantWarningsSuppressed =
+                    false;
+                assertPresentationInvariants();
+                console.log("[ONA Restore] completed");
+                return;
+            }
+
+            if (
+                snapshot?.presentationOwner === PresentationOwner.ONA_SYSTEM_OVERLAY ||
+                snapshot?.systemMenuOpen
+            ) {
+                if (
+                    snapshot?.nativeShellMinimize ||
+                    !snapshot?.activeGameSession?.pid
+                ) {
+                    console.warn(
+                        "[ONA State] INVALID SYSTEM OVERLAY REQUEST source=restore"
+                    );
+                } else {
+                currentState =
+                    ONA_STATE.QUICK_MENU;
+                setUiOperation("running");
+                setConsolePresentationState(
+                    ConsolePresentationState.RUNNING
+                );
+                setGameSessionState(
+                    GameSessionState.SYSTEM_OVERLAY
+                );
+                clearGameLifecycleOverlay();
+                await invoke("show_system_overlay_over_game");
+                await setGameInputRouting(false);
+                setPresentationOwner(
+                    PresentationOwner.ONA_SYSTEM_OVERLAY
+                );
+                systemMenu
+                    ?.classList
+                    .add("visible");
+                document.body
+                    .classList
+                    .add("system-menu-open");
+                document.body
+                    .classList
+                    .add("mouse-enabled");
+                document.body
+                    .classList
+                    .add("game-system-overlay");
+                console.log(
+                    "[ONA QuickMenu] Entered from running game"
+                );
+                console.log("[ONA Restore] completed");
+                return;
+                }
+            }
+
+            if (snapshot?.activeGameSession?.state === GameSessionState.BACKGROUND) {
+                console.log(
+                    "[ONA Restore] applying shell mode"
+                );
+                await invoke("restore_shell_window_presentation").catch(
+                    (error) =>
+                        console.warn("[ONA Presentation] Could not restore shell after minimize:", error)
+                );
+                await invoke("release_presentation_guard").catch(() => {});
+                await setGameInputRouting(false);
+                systemMenu
+                    ?.classList
+                    .remove("visible");
+                document.body
+                    .classList
+                    .remove("system-menu-open");
+                document.body
+                    .classList
+                    .remove("mouse-enabled");
+                document.body
+                    .classList
+                    .remove("game-system-overlay");
+                setUiOperation("idle");
+                setConsolePresentationState(
+                    ConsolePresentationState.IDLE
+                );
+                setGameSessionState(
+                    GameSessionState.BACKGROUND
+                );
+                setPresentationOwner(
+                    PresentationOwner.ONA_SHELL
+                );
+                updateActiveGameSession({
+                    state:
+                        GameSessionState.BACKGROUND,
+                    presentationState:
+                        ConsolePresentationState.IDLE
+                });
+                transitionTo(
+                    snapshot.currentState || ONA_STATE.HOME
+                );
+                console.log("[ONA Restore] QuickMenu=false");
+                console.log("[ONA Restore] opacity=255");
+                console.log("[ONA Restore] alwaysOnTop=false");
+                console.log("[ONA Restore] owner=ONA_SHELL");
+                console.log("[ONA Restore] completed");
+                return;
+            }
+
+            console.log(
+                "[ONA Restore] applying shell mode"
+            );
+            await invoke("restore_shell_window_presentation").catch(
+                (error) =>
+                    console.warn("[ONA Presentation] Could not restore shell presentation:", error)
+            );
+            await invoke("release_presentation_guard").catch(() => {});
+            await setGameInputRouting(false);
+            systemMenu
+                ?.classList
+                .remove("visible");
+            document.body
+                .classList
+                .remove("system-menu-open");
+            document.body
+                .classList
+                .remove("mouse-enabled");
+            document.body
+                .classList
+                .remove("game-system-overlay");
+            setPresentationOwner(
+                PresentationOwner.ONA_SHELL
+            );
+            setGameSessionState(
+                snapshot?.gameSessionState || GameSessionState.IDLE
+            );
+            setConsolePresentationState(
+                snapshot?.consolePresentationState || ConsolePresentationState.IDLE
+            );
+            transitionTo(
+                snapshot?.currentState || ONA_STATE.HOME
+            );
+            console.log("[ONA Restore] QuickMenu=false");
+            console.log("[ONA Restore] opacity=255");
+            console.log("[ONA Restore] alwaysOnTop=false");
+            console.log("[ONA Restore] owner=ONA_SHELL");
+            console.log("[ONA Restore] completed");
+
+        });
+    }
+    finally {
+        preMinimizePresentationState =
+            null;
+        nativeShellMinimizeRestore =
+            false;
+        restoringConsoleExperience =
+            false;
+    }
+
+}
+
+
 minimizeButton?.addEventListener(
     "click",
     async () => {
 
         try {
 
-            await invoke("minimize_main_window");
+            await minimizeOnaConsoleExperience();
 
         }
 
@@ -6817,6 +7565,55 @@ minimizeButton?.addEventListener(
         }
 
     }
+);
+
+window.addEventListener(
+    "focus",
+    () => {
+        console.log("[ONA NativeWindow] focus telemetry");
+    }
+);
+
+document.addEventListener(
+    "visibilitychange",
+    () => {
+        console.log(
+            `[ONA NativeWindow] visibility telemetry hidden=${document.hidden}`
+        );
+    }
+);
+
+tauri.event.listen(
+    "ona-native-minimized",
+    () => {
+        console.log("[ONA Minimize] native event");
+        handleNativeMainWindowMinimize();
+    }
+);
+
+tauri.event.listen(
+    "ona-native-restored",
+    () => {
+        console.log("[ONA Restore] native event");
+        console.log(
+            `[ONA Restore] previousOwner=${preMinimizePresentationState?.presentationOwner || PresentationOwner.ONA_SHELL}`
+        );
+        restoreOnaConsoleExperience();
+    }
+);
+
+tauri.event.listen(
+    "ona-native-close-requested",
+    () => {
+        console.log("[ONA NativeWindow] close_requested");
+    }
+);
+
+window.setInterval(
+    () => {
+        runPresentationWatchdog();
+    },
+    1000
 );
 
 

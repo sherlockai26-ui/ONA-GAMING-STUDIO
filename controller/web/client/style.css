@@ -41,7 +41,7 @@ body {
         Helvetica,
         sans-serif;
 
-    touch-action: none;
+    touch-action: manipulation;
 
     overscroll-behavior: none;
 }
@@ -164,14 +164,14 @@ body {
 }
 
 .connection-status {
-    position: absolute;
+    position: fixed;
 
     left: 50%;
-    top:
-        clamp(
-            30px,
-            8dvh,
-            42px
+    top: auto;
+    bottom:
+        max(
+            8px,
+            env(safe-area-inset-bottom)
         );
 
     transform: translateX(-50%);
@@ -195,6 +195,9 @@ body {
     font-size: 9px;
 
     letter-spacing: 1.4px;
+
+    z-index: 8;
+    pointer-events: none;
 }
 
 body[data-connection-state="reconnecting..."] .connection-status {
@@ -299,6 +302,118 @@ body[data-connection-state="session expired"] .connection-status {
     letter-spacing: 0.5px;
 
     touch-action: none;
+}
+
+.customize-toggle {
+    position: fixed;
+
+    right:
+        max(
+            10px,
+            env(safe-area-inset-right)
+        );
+    bottom:
+        max(
+            10px,
+            env(safe-area-inset-bottom)
+        );
+
+    min-width: 48px;
+    height: 26px;
+
+    border: 1px solid rgba(180, 220, 245, 0.25);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.42);
+    color: rgba(220, 235, 245, 0.82);
+    font-size: 9px;
+    letter-spacing: 1px;
+    z-index: 10;
+}
+
+.customize-panel {
+    position: fixed;
+    left:
+        max(
+            10px,
+            env(safe-area-inset-left)
+        );
+    right:
+        max(
+            70px,
+            env(safe-area-inset-right)
+        );
+    bottom:
+        max(
+            10px,
+            env(safe-area-inset-bottom)
+        );
+
+    display: flex;
+    gap: 6px;
+    align-items: center;
+
+    min-height: 30px;
+    padding: 4px;
+
+    border: 1px solid rgba(140, 210, 255, 0.2);
+    border-radius: 6px;
+    background: rgba(1, 6, 12, 0.78);
+    backdrop-filter: blur(10px);
+    z-index: 9;
+    overflow-x: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-x;
+}
+
+.customize-panel[hidden] {
+    display: none;
+}
+
+.customize-panel button {
+    min-width: 44px;
+    height: 22px;
+    border: 1px solid rgba(180, 220, 245, 0.2);
+    border-radius: 4px;
+    background: rgba(80, 110, 140, 0.24);
+    color: rgba(230, 245, 255, 0.86);
+    font-size: 8px;
+    letter-spacing: 0.6px;
+}
+
+body.controller-customizing .customize-toggle {
+    border-color: rgba(120, 230, 255, 0.74);
+    color: #eaf6ff;
+}
+
+.ona-customizable {
+    translate:
+        var(--ona-control-x, 0px)
+        var(--ona-control-y, 0px);
+    scale:
+        var(--ona-control-scale, 1);
+}
+
+body.controller-customizing .ona-customizable {
+    outline:
+        1px solid
+        rgba(120, 230, 255, 0.42);
+    outline-offset: 3px;
+}
+
+body.controller-customizing .ona-customizable.customization-selected {
+    outline:
+        2px solid
+        rgba(255, 255, 255, 0.8);
+    outline-offset: 5px;
+}
+
+body[data-controller-palette="red"] .action-button,
+body[data-controller-palette="red"] #joystick {
+    border-color: rgba(255, 160, 160, 0.68);
+    box-shadow:
+        0 0 12px rgba(255, 80, 90, 0.55),
+        0 0 30px rgba(255, 70, 70, 0.2),
+        inset 0 0 18px rgba(255, 255, 255, 0.14);
 }
 
 

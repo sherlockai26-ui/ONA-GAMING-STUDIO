@@ -29,6 +29,8 @@ const joystick = document.getElementById("joystick");
 
 const buttons =
     [...new Set(document.querySelectorAll("[data-button]"))];
+const customizeToggle = document.getElementById("customize-toggle");
+const customizePanel = document.getElementById("customize-panel");
 
 const pairingParams = new URLSearchParams(window.location.search);
 const sessionId = pairingParams.get("id");
@@ -55,6 +57,7 @@ let reconnectTimer = null;
 let heartbeatTimer = null;
 let reconnectEnabled = true;
 let playerId = null;
+let lastTouchEndAt = 0;
 
 function sendControllerMessage(message) {
     if (controllerSocket?.readyState === WebSocket.OPEN) {
@@ -114,6 +117,17 @@ function connectWebSocket() {
                 reconnectEnabled = false;
                 stopHeartbeat();
                 console.warn("[CONTROLLER] reconnect rejected", message.reason);
+                if (
+                    String(message.reason || "")
+                        .toUpperCase()
+                        .includes("INVALID")
+                ) {
+                    window.localStorage.removeItem("onaControllerSession");
+                    window.localStorage.removeItem("onaControllerPairing");
+                    setControllerConnectionState("PAIRING REQUIRED");
+                    console.warn("[CONTROLLER] invalid stored pairing cleared; layout preserved");
+                    return;
+                }
                 setControllerConnectionState("SESSION EXPIRED");
                 return;
             }
@@ -187,6 +201,343 @@ connectWebSocket();
 const activePointers = new Map();
 const activeButtonCounts = new Map();
 let joystickPointerId = null;
+let controllerCustomizing = false;
+let controllerUiMode = "NORMAL";
+let selectedCustomizationId = "joystick";
+let customizationPointer = null;
+
+const controllerCustomizationStorageKey =
+    "onaControllerCustomizationV1";
+
+const customizableControls = [
+    ["joystick", zone],
+    ...buttons.map((button) => [button.dataset.button, button])
+].filter(([, element]) => Boolean(element));
+
+const defaultCustomization = {
+    palette: "blue",
+    controls: Object.fromEntries(
+        customizableControls.map(([id]) => [
+            id,
+            {
+                x: 0,
+                y: 0,
+                scale: 1
+            }
+        ])
+    )
+};
+
+let controllerCustomization =
+    loadControllerCustomization();
+let draftControllerCustomization =
+    null;
+
+function cloneCustomization(customization) {
+    return JSON.parse(JSON.stringify(customization));
+}
+
+function loadControllerCustomization() {
+    try {
+        const stored =
+            JSON.parse(
+                window.localStorage.getItem(controllerCustomizationStorageKey) || "null"
+            );
+
+        return mergeCustomization(stored);
+    }
+    catch {
+        return mergeCustomization(null);
+    }
+}
+
+function mergeCustomization(stored) {
+    return {
+        palette:
+            stored?.palette || defaultCustomization.palette,
+        controls:
+            Object.fromEntries(
+                customizableControls.map(([id]) => {
+                    const control =
+                        stored?.controls?.[id] ||
+                        defaultCustomization.controls[id];
+
+                    return [
+                        id,
+                        {
+                            x:
+                                clamp(Number(control.x) || 0, -180, 180),
+                            y:
+                                clamp(Number(control.y) || 0, -90, 90),
+                            scale:
+                                clamp(Number(control.scale) || 1, 0.75, 1.35)
+                        }
+                    ];
+                })
+            )
+    };
+}
+
+function saveControllerCustomization() {
+    window.localStorage.setItem(
+        controllerCustomizationStorageKey,
+        JSON.stringify(controllerCustomization)
+    );
+}
+
+function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+}
+
+function applyControllerCustomization() {
+    const activeCustomization =
+        draftControllerCustomization || controllerCustomization;
+
+    document.body.dataset.controllerPalette =
+        activeCustomization.palette;
+
+    for (const [id, element] of customizableControls) {
+        element.classList.add("ona-customizable");
+        element.classList.toggle(
+            "customization-selected",
+            controllerUiMode === "EDIT_LAYOUT" && selectedCustomizationId === id
+        );
+        const control =
+            activeCustomization.controls[id] ||
+            defaultCustomization.controls[id];
+
+        element.style.setProperty("--ona-control-x", `${control.x}px`);
+        element.style.setProperty("--ona-control-y", `${control.y}px`);
+        element.style.setProperty("--ona-control-scale", String(control.scale));
+    }
+}
+
+function setControllerUiMode(mode) {
+    controllerUiMode =
+        mode || "NORMAL";
+    controllerCustomizing =
+        controllerUiMode !== "NORMAL";
+
+    console.log(`[CONTROLLER UI] mode=${controllerUiMode}`);
+
+    if (controllerUiMode === "EDIT_LAYOUT") {
+        draftControllerCustomization =
+            cloneCustomization(controllerCustomization);
+        neutralizeLocalInputState();
+    }
+
+    if (controllerUiMode === "NORMAL") {
+        draftControllerCustomization =
+            null;
+    }
+
+    document.body.classList.toggle(
+        "controller-customizing",
+        controllerCustomizing
+    );
+
+    if (customizePanel) {
+        customizePanel.hidden =
+            !controllerCustomizing;
+    }
+
+    applyControllerCustomization();
+}
+
+function customizationTargetAt(x, y) {
+    const element =
+        document.elementFromPoint(x, y);
+    const target =
+        element?.closest?.(".ona-customizable");
+
+    return customizableControls.find(([, control]) => control === target) || null;
+}
+
+function startCustomizationDrag(event) {
+    if (controllerUiMode !== "EDIT_LAYOUT") {
+        return false;
+    }
+
+    const target =
+        customizationTargetAt(event.clientX, event.clientY);
+
+    if (!target) {
+        return false;
+    }
+
+    const [id, element] =
+        target;
+    const control =
+        draftControllerCustomization.controls[id];
+
+    selectedCustomizationId =
+        id;
+    console.log(`[CONTROLLER UI] selected=${id}`);
+    applyControllerCustomization();
+    customizationPointer = {
+        pointerId:
+            event.pointerId,
+        id,
+        element,
+        startX:
+            event.clientX,
+        startY:
+            event.clientY,
+        originalX:
+            control.x,
+        originalY:
+            control.y
+    };
+
+    capturePointer(element, event.pointerId);
+    return true;
+}
+
+function moveCustomizationDrag(event) {
+    if (
+        !customizationPointer ||
+        customizationPointer.pointerId !== event.pointerId
+    ) {
+        return false;
+    }
+
+    const control =
+        draftControllerCustomization.controls[customizationPointer.id];
+
+    control.x =
+        clamp(customizationPointer.originalX + event.clientX - customizationPointer.startX, -180, 180);
+    control.y =
+        clamp(customizationPointer.originalY + event.clientY - customizationPointer.startY, -90, 90);
+    console.log(
+        `[CONTROLLER UI] drag ${customizationPointer.id} x=${control.x.toFixed(0)} y=${control.y.toFixed(0)}`
+    );
+    applyControllerCustomization();
+    return true;
+}
+
+function endCustomizationDrag(event) {
+    if (
+        !customizationPointer ||
+        customizationPointer.pointerId !== event.pointerId
+    ) {
+        return false;
+    }
+
+    releasePointer(customizationPointer.element, event.pointerId);
+    customizationPointer =
+        null;
+    return true;
+}
+
+function applyCustomizationPreset(name) {
+    draftControllerCustomization =
+        mergeCustomization(null);
+
+    if (name === "compact") {
+        for (const control of Object.values(draftControllerCustomization.controls)) {
+            control.scale = 0.88;
+        }
+    }
+
+    if (name === "large") {
+        for (const control of Object.values(draftControllerCustomization.controls)) {
+            control.scale = 1.18;
+        }
+    }
+
+    if (name === "left") {
+        draftControllerCustomization.controls.joystick.x = 120;
+        for (const button of ["A", "B", "X", "Y"]) {
+            draftControllerCustomization.controls[button].x = -120;
+        }
+    }
+
+    applyControllerCustomization();
+}
+
+customizeToggle?.addEventListener(
+    "pointerdown",
+    (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setControllerUiMode(
+            controllerUiMode === "NORMAL"
+                ? "EDIT_LAYOUT"
+                : "NORMAL"
+        );
+    },
+    { passive: false }
+);
+
+customizePanel?.addEventListener(
+    "pointerdown",
+    (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const action =
+            event.target?.dataset?.customizeAction;
+
+        if (!action) {
+            return;
+        }
+
+        if (action === "done") {
+            controllerCustomization =
+                cloneCustomization(draftControllerCustomization || controllerCustomization);
+            saveControllerCustomization();
+            console.log("[CONTROLLER UI] layout saved");
+            setControllerUiMode("NORMAL");
+            return;
+        }
+
+        if (action === "cancel") {
+            console.log("[CONTROLLER UI] layout cancelled");
+            setControllerUiMode("NORMAL");
+            return;
+        }
+
+        if (action.startsWith("preset-")) {
+            applyCustomizationPreset(action.replace("preset-", ""));
+            return;
+        }
+
+        if (action === "palette-blue" || action === "palette-red") {
+            const targetCustomization =
+                draftControllerCustomization || controllerCustomization;
+            targetCustomization.palette =
+                action.replace("palette-", "");
+            applyControllerCustomization();
+            return;
+        }
+
+        if (action === "size-up" || action === "size-down") {
+            const targetCustomization =
+                draftControllerCustomization || controllerCustomization;
+            const control =
+                targetCustomization.controls[selectedCustomizationId];
+
+            if (control) {
+                control.scale =
+                    clamp(control.scale + (action === "size-up" ? 0.05 : -0.05), 0.75, 1.35);
+                console.log(
+                    `[CONTROLLER UI] resize ${selectedCustomizationId} size=${control.scale.toFixed(2)}`
+                );
+                applyControllerCustomization();
+            }
+            return;
+        }
+
+        if (action === "reset") {
+            draftControllerCustomization =
+                mergeCustomization(null);
+            applyControllerCustomization();
+        }
+    },
+    { passive: false }
+);
+
+applyControllerCustomization();
 
 document.addEventListener(
     "gesturestart",
@@ -212,8 +563,41 @@ document.addEventListener(
 );
 
 document.addEventListener(
+    "touchmove",
+    (event) => {
+        if (!event.target?.closest?.(".customize-panel")) {
+            event.preventDefault();
+        }
+    },
+    { passive: false }
+);
+
+document.addEventListener(
+    "touchend",
+    (event) => {
+        const now =
+            Date.now();
+
+        if (now - lastTouchEndAt < 320) {
+            event.preventDefault();
+        }
+
+        lastTouchEndAt =
+            now;
+    },
+    { passive: false }
+);
+
+document.addEventListener(
     "selectstart",
     (event) => event.preventDefault()
+);
+
+window.addEventListener(
+    "pageshow",
+    () => {
+        window.scrollTo(0, 0);
+    }
 );
 
 function pointInsideElement(x, y, element) {
@@ -449,6 +833,13 @@ controller.addEventListener(
     "pointerdown",
     (event) => {
         event.preventDefault();
+        if (controllerUiMode !== "NORMAL") {
+            startCustomizationDrag(event);
+            return;
+        }
+        if (startCustomizationDrag(event)) {
+            return;
+        }
         assignPointer(event);
     },
     { passive: false }
@@ -458,6 +849,13 @@ controller.addEventListener(
     "pointermove",
     (event) => {
         event.preventDefault();
+        if (controllerUiMode !== "NORMAL") {
+            moveCustomizationDrag(event);
+            return;
+        }
+        if (moveCustomizationDrag(event)) {
+            return;
+        }
         movePointer(event);
     },
     { passive: false }
@@ -467,6 +865,13 @@ controller.addEventListener(
     "pointerup",
     (event) => {
         event.preventDefault();
+        if (controllerUiMode !== "NORMAL") {
+            endCustomizationDrag(event);
+            return;
+        }
+        if (endCustomizationDrag(event)) {
+            return;
+        }
         releaseActivePointer(event);
     },
     { passive: false }
@@ -476,6 +881,13 @@ controller.addEventListener(
     "pointercancel",
     (event) => {
         event.preventDefault();
+        if (controllerUiMode !== "NORMAL") {
+            endCustomizationDrag(event);
+            return;
+        }
+        if (endCustomizationDrag(event)) {
+            return;
+        }
         releaseActivePointer(event, true);
     },
     { passive: false }

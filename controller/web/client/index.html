@@ -89,6 +89,15 @@
                 CONNECTING
             </div>
 
+            <button
+                type="button"
+                id="customize-toggle"
+                class="customize-toggle"
+                aria-label="Customize controller layout"
+            >
+                EDIT
+            </button>
+
 
             <div class="system-buttons">
 
@@ -190,6 +199,25 @@
             </button>
 
 
+        </section>
+
+
+        <section
+            id="customize-panel"
+            class="customize-panel"
+            hidden
+        >
+            <button type="button" data-customize-action="done">DONE</button>
+            <button type="button" data-customize-action="cancel">CANCEL</button>
+            <button type="button" data-customize-action="preset-default">DEFAULT</button>
+            <button type="button" data-customize-action="preset-compact">COMPACT</button>
+            <button type="button" data-customize-action="preset-large">LARGE</button>
+            <button type="button" data-customize-action="preset-left">LEFT</button>
+            <button type="button" data-customize-action="size-down">- SIZE</button>
+            <button type="button" data-customize-action="size-up">+ SIZE</button>
+            <button type="button" data-customize-action="palette-blue">BLUE</button>
+            <button type="button" data-customize-action="palette-red">RED</button>
+            <button type="button" data-customize-action="reset">RESET</button>
         </section>
 
 

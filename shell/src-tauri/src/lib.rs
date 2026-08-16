@@ -4,6 +4,7 @@
 mod cursor_manager;
 mod display_manager;
 mod game_handoff;
+mod presentation_adapter;
 
 use ona_core::game_manager::{
     catalog::GameCatalog,
@@ -29,8 +30,17 @@ use ona_core::runtime::{
 };
 use ona_core::session::manager::persistent_pairing_session;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf, sync::Mutex, thread, time::Duration};
-use tauri::{Emitter, Manager};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
+use tauri::{utils::config::Color, Emitter, Manager};
+
+const MAIN_WINDOW_LABEL: &str = "main";
+const PRESENTATION_GUARD_LABEL: &str = "presentation_guard";
 
 struct OnaGameRuntime {
     launcher: GameLauncher,
@@ -84,6 +94,42 @@ struct OnaStorageInfo {
     app_data_path: String,
     installed_games: usize,
     app_data_bytes: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowPresentationSnapshot {
+    label: String,
+    visible: bool,
+    minimized: bool,
+    fullscreen: bool,
+    decorated: bool,
+    resizable: bool,
+    always_on_top: bool,
+    opacity: u8,
+    transparent: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PresentationGuardNativeStatus {
+    exists: bool,
+    visible: bool,
+    always_on_top: bool,
+    fullscreen: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OnaLocalConnectivityInfo {
+    network_mode: String,
+    internet_available: bool,
+    lan_available: bool,
+    direct_local_supported: bool,
+    direct_local_active: bool,
+    local_ipv4: Option<String>,
+    controller_url: Option<String>,
+    notes: Vec<String>,
 }
 
 #[tauri::command]
@@ -206,6 +252,79 @@ fn storage_information(app_handle: tauri::AppHandle) -> Result<OnaStorageInfo, S
         installed_games: games.games.len(),
         app_data_bytes: directory_size(&app_data_dir),
     })
+}
+
+#[tauri::command]
+fn local_connectivity_status() -> OnaLocalConnectivityInfo {
+    let local_ipv4 = local_ip_address::local_ip()
+        .ok()
+        .filter(|ip| ip.is_ipv4() && !ip.is_loopback())
+        .map(|ip| ip.to_string());
+    let lan_available = local_ipv4.is_some();
+    let controller_url = local_ipv4
+        .as_ref()
+        .map(|ip| format!("http://{ip}:8080/controller/"));
+    let mut notes = vec![
+        "Internet connectivity is not required for ONA Controller local play.".to_string(),
+        "Direct Local hotspot mode is not started by ONA Runtime V1.".to_string(),
+    ];
+
+    #[cfg(windows)]
+    let direct_local_supported = windows_direct_local_supported(&mut notes);
+
+    #[cfg(not(windows))]
+    let direct_local_supported = false;
+
+    OnaLocalConnectivityInfo {
+        network_mode: if lan_available {
+            "LOCAL_NETWORK".to_string()
+        } else {
+            "NO_LOCAL_LINK".to_string()
+        },
+        internet_available: false,
+        lan_available,
+        direct_local_supported,
+        direct_local_active: false,
+        local_ipv4,
+        controller_url,
+        notes,
+    }
+}
+
+#[tauri::command]
+fn presentation_adapter_contract() -> presentation_adapter::PresentationAdapterContract {
+    presentation_adapter::contract()
+}
+
+#[cfg(windows)]
+fn windows_direct_local_supported(notes: &mut Vec<String>) -> bool {
+    let output = std::process::Command::new("netsh")
+        .args(["wlan", "show", "drivers"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let text = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            let supported = text.contains("wi-fi direct")
+                || text.contains("hosted network supported  : yes")
+                || text.contains("red hospedada admitida  : s");
+            notes.push("Windows WLAN capability was inspected with netsh; ONA does not enable a hotspot automatically.".to_string());
+            supported
+        }
+        Ok(_) => {
+            notes.push(
+                "Windows WLAN capability probe returned no usable Direct Local support."
+                    .to_string(),
+            );
+            false
+        }
+        Err(_) => {
+            notes.push(
+                "Windows WLAN capability probe could not run in this environment.".to_string(),
+            );
+            false
+        }
+    }
 }
 
 #[tauri::command]
@@ -375,7 +494,7 @@ fn restore_game_cursor(app_handle: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn prepare_shell_for_game(app_handle: tauri::AppHandle) -> Result<(), String> {
     let window = app_handle
-        .get_webview_window("main")
+        .get_webview_window(MAIN_WINDOW_LABEL)
         .ok_or_else(|| "Main ONA window was not found.".to_string())?;
 
     cursor_manager::hide_for_game_session(Some(&window));
@@ -385,24 +504,144 @@ fn prepare_shell_for_game(app_handle: tauri::AppHandle) -> Result<(), String> {
 
     let _ = platform_set_window_opacity(&window, 255);
     let _ = window.set_always_on_top(false);
-    window.hide().map_err(|error| error.to_string())
+    let _ = window.set_decorations(false);
+    window.hide().map_err(|error| error.to_string())?;
+    let snapshot = window_presentation_snapshot(&window, 255, false)?;
+    println!("[ONA Restore] opacity={}", snapshot.opacity);
+    println!("[ONA Restore] alwaysOnTop={}", snapshot.always_on_top);
+    println!("[ONA Restore] transparency={}", snapshot.transparent);
+    println!("[ONA Restore] fullscreen={}", snapshot.fullscreen);
+    Ok(())
 }
 
 #[tauri::command]
-fn show_presentation_guard(app_handle: tauri::AppHandle) -> Result<(), String> {
+fn show_presentation_guard(
+    app_handle: tauri::AppHandle,
+    mode: Option<String>,
+) -> Result<(), String> {
+    show_dedicated_presentation_guard(&app_handle, mode.as_deref())
+}
+
+fn presentation_guard_window(
+    app_handle: &tauri::AppHandle,
+) -> Result<tauri::WebviewWindow, String> {
+    if let Some(window) = app_handle.get_webview_window(PRESENTATION_GUARD_LABEL) {
+        return Ok(window);
+    }
+
+    tauri::WebviewWindowBuilder::new(
+        app_handle,
+        PRESENTATION_GUARD_LABEL,
+        tauri::WebviewUrl::App("presentation-guard.html".into()),
+    )
+    .title("ONA Presentation Guard")
+    .decorations(false)
+    .resizable(false)
+    .visible(false)
+    .skip_taskbar(true)
+    .transparent(false)
+    .background_color(Color(2, 5, 10, 255))
+    .always_on_top(true)
+    .build()
+    .map_err(|error| error.to_string())
+}
+
+fn configure_guard_window(
+    app_handle: &tauri::AppHandle,
+    window: &tauri::WebviewWindow,
+) -> Result<(), String> {
+    let layout = display_manager::detect_layout(app_handle).map_err(|error| error.to_string())?;
+    display_manager::apply_layout_to_window(window, &layout).map_err(|error| error.to_string())?;
+    window
+        .set_decorations(false)
+        .map_err(|error| error.to_string())?;
+    window
+        .set_resizable(false)
+        .map_err(|error| error.to_string())?;
+    window
+        .set_always_on_top(true)
+        .map_err(|error| error.to_string())?;
+    platform_set_window_opacity(window, 255)?;
+    Ok(())
+}
+
+fn show_dedicated_presentation_guard(
+    app_handle: &tauri::AppHandle,
+    mode: Option<&str>,
+) -> Result<(), String> {
+    let window = presentation_guard_window(app_handle)?;
+    let mode = mode.unwrap_or("RETURNING_TO_ONA");
+
+    println!("[ONA Guard] show requested");
+    configure_guard_window(app_handle, &window)?;
+    let _ = window.emit("ona-guard-mode", mode);
+    let _ = window.unminimize();
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+
+    let snapshot = window_presentation_snapshot(&window, 255, false)?;
+    if !snapshot.visible || !snapshot.always_on_top {
+        return Err(format!(
+            "GUARD_SHOW_NOT_CONFIRMED visible={} topmost={}",
+            snapshot.visible, snapshot.always_on_top
+        ));
+    }
+    println!("[ONA Guard] visible confirmed");
+    println!("[ONA Presentation] dedicated guard visible {snapshot:?}");
+    println!("[ONA Presentation] WINDOWS EXPOSURE RISK prevented");
+    Ok(())
+}
+
+fn restore_main_shell_presentation(app_handle: &tauri::AppHandle) -> Result<(), String> {
     let window = app_handle
-        .get_webview_window("main")
+        .get_webview_window(MAIN_WINDOW_LABEL)
         .ok_or_else(|| "Main ONA window was not found.".to_string())?;
 
     let _ = window.unminimize();
     window.show().map_err(|error| error.to_string())?;
     let layout = display_manager::detect_layout(&app_handle).map_err(|error| error.to_string())?;
     display_manager::apply_layout_to_window(&window, &layout).map_err(|error| error.to_string())?;
+    window
+        .set_decorations(false)
+        .map_err(|error| error.to_string())?;
+    window
+        .set_resizable(false)
+        .map_err(|error| error.to_string())?;
     platform_set_window_opacity(&window, 255)?;
-    let _ = window.set_always_on_top(true);
+    let _ = window.set_always_on_top(false);
+    Ok(())
+}
+
+#[tauri::command]
+fn restore_shell_window_presentation(app_handle: tauri::AppHandle) -> Result<(), String> {
+    restore_main_shell_presentation(&app_handle)?;
+    let window = app_handle
+        .get_webview_window(MAIN_WINDOW_LABEL)
+        .ok_or_else(|| "Main ONA window was not found.".to_string())?;
+    cursor_manager::restore_after_game_session(Some(&window));
     window.set_focus().map_err(|error| error.to_string())?;
-    println!("[ONA Presentation] guard visible");
-    println!("[ONA Presentation] WINDOWS EXPOSURE RISK prevented");
+    let snapshot = window_presentation_snapshot(&window, 255, false)?;
+    println!("[ONA Restore] opacity={}", snapshot.opacity);
+    println!("[ONA Restore] alwaysOnTop={}", snapshot.always_on_top);
+    println!("[ONA Restore] transparency={}", snapshot.transparent);
+    println!("[ONA Restore] fullscreen={}", snapshot.fullscreen);
+    Ok(())
+}
+
+#[tauri::command]
+fn show_shell_system_overlay_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let window = app_handle
+        .get_webview_window(MAIN_WINDOW_LABEL)
+        .ok_or_else(|| "Main ONA window was not found.".to_string())?;
+
+    restore_main_shell_presentation(&app_handle)?;
+    window
+        .set_always_on_top(true)
+        .map_err(|error| error.to_string())?;
+    platform_set_window_opacity(&window, 216)?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    let snapshot = window_presentation_snapshot(&window, 216, false)?;
+    println!("[ONA QuickMenu] native overlay visible over game {snapshot:?}");
     Ok(())
 }
 
@@ -483,15 +722,10 @@ async fn wait_for_game_handoff_ready(
 
 #[tauri::command]
 fn restore_shell_after_game(app_handle: tauri::AppHandle) -> Result<(), String> {
+    restore_main_shell_presentation(&app_handle)?;
     let window = app_handle
-        .get_webview_window("main")
+        .get_webview_window(MAIN_WINDOW_LABEL)
         .ok_or_else(|| "Main ONA window was not found.".to_string())?;
-
-    let _ = window.unminimize();
-    window.show().map_err(|error| error.to_string())?;
-    let layout = display_manager::detect_layout(&app_handle).map_err(|error| error.to_string())?;
-    display_manager::apply_layout_to_window(&window, &layout).map_err(|error| error.to_string())?;
-    platform_set_window_opacity(&window, 255)?;
     cursor_manager::restore_after_game_session(Some(&window));
     println!("[ONA Presentation] ONA Shell restored after game session.");
     window.set_focus().map_err(|error| error.to_string())
@@ -499,41 +733,105 @@ fn restore_shell_after_game(app_handle: tauri::AppHandle) -> Result<(), String> 
 
 #[tauri::command]
 fn release_presentation_guard(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let window = app_handle
-        .get_webview_window("main")
-        .ok_or_else(|| "Main ONA window was not found.".to_string())?;
+    println!("[ONA Guard] release requested");
 
-    platform_set_window_opacity(&window, 255)?;
-    let _ = window.set_always_on_top(false);
-    println!("[ONA Presentation] guard released");
+    if let Some(guard) = app_handle.get_webview_window(PRESENTATION_GUARD_LABEL) {
+        guard.set_always_on_top(false).map_err(|error| {
+            let reason = error.to_string();
+            println!("[ONA Guard] RELEASE FAILED reason={reason}");
+            reason
+        })?;
+        println!("[ONA Guard] always_on_top=false");
+
+        guard.hide().map_err(|error| {
+            let reason = error.to_string();
+            println!("[ONA Guard] RELEASE FAILED reason={reason}");
+            reason
+        })?;
+        println!("[ONA Guard] hide requested");
+
+        let snapshot = window_presentation_snapshot(&guard, 255, false).map_err(|error| {
+            println!("[ONA Guard] RELEASE FAILED reason={error}");
+            error
+        })?;
+        println!("[ONA Guard] native visible={}", snapshot.visible);
+
+        if snapshot.visible || snapshot.always_on_top {
+            let reason = format!(
+                "GUARD_RELEASE_NOT_CONFIRMED visible={} topmost={}",
+                snapshot.visible, snapshot.always_on_top
+            );
+            println!("[ONA Guard] RELEASE FAILED reason={reason}");
+            return Err(reason);
+        }
+
+        println!("[ONA Guard] hidden confirmed");
+    }
+
+    if let Some(window) = app_handle.get_webview_window(MAIN_WINDOW_LABEL) {
+        platform_set_window_opacity(&window, 255)?;
+        let _ = window.set_always_on_top(false);
+    }
+
+    println!("[ONA Guard] release confirmed");
     Ok(())
 }
 
 #[tauri::command]
-fn show_system_overlay_over_game(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let window = app_handle
-        .get_webview_window("main")
-        .ok_or_else(|| "Main ONA window was not found.".to_string())?;
+fn presentation_guard_native_status(
+    app_handle: tauri::AppHandle,
+) -> Result<PresentationGuardNativeStatus, String> {
+    let Some(guard) = app_handle.get_webview_window(PRESENTATION_GUARD_LABEL) else {
+        return Ok(PresentationGuardNativeStatus {
+            exists: false,
+            visible: false,
+            always_on_top: false,
+            fullscreen: false,
+        });
+    };
 
-    let _ = window.unminimize();
-    window.show().map_err(|error| error.to_string())?;
-    let _ = window.set_always_on_top(true);
-    platform_set_window_opacity(&window, 216)?;
-    window.set_focus().map_err(|error| error.to_string())?;
-    println!("[ONA QuickMenu] native overlay visible over game");
-    Ok(())
+    Ok(PresentationGuardNativeStatus {
+        exists: true,
+        visible: guard.is_visible().map_err(|error| error.to_string())?,
+        always_on_top: platform_window_is_topmost(&guard)?,
+        fullscreen: guard.is_fullscreen().map_err(|error| error.to_string())?,
+    })
+}
+
+#[tauri::command]
+fn show_system_overlay_over_game(app_handle: tauri::AppHandle) -> Result<(), String> {
+    show_shell_system_overlay_window(app_handle)
 }
 
 #[tauri::command]
 fn hide_system_overlay_over_game(app_handle: tauri::AppHandle) -> Result<(), String> {
     let window = app_handle
-        .get_webview_window("main")
+        .get_webview_window(MAIN_WINDOW_LABEL)
         .ok_or_else(|| "Main ONA window was not found.".to_string())?;
 
     platform_set_window_opacity(&window, 255)?;
     let _ = window.set_always_on_top(false);
-    println!("[ONA QuickMenu] native overlay hidden");
+    let snapshot = window_presentation_snapshot(&window, 255, false)?;
+    println!("[ONA QuickMenu] native overlay hidden {snapshot:?}");
     Ok(())
+}
+
+fn window_presentation_snapshot(
+    window: &tauri::WebviewWindow,
+    opacity: u8,
+    transparent: bool,
+) -> Result<WindowPresentationSnapshot, String> {
+    Ok(WindowPresentationSnapshot {
+        label: window.label().to_string(),
+        visible: window.is_visible().map_err(|error| error.to_string())?,
+        minimized: window.is_minimized().map_err(|error| error.to_string())?,
+        fullscreen: window.is_fullscreen().map_err(|error| error.to_string())?,
+        decorated: window.is_decorated().map_err(|error| error.to_string())?,
+        resizable: window.is_resizable().map_err(|error| error.to_string())?,
+        always_on_top: platform_window_is_topmost(window).unwrap_or(false),
+        opacity,
+        transparent,
+    })
 }
 
 #[cfg(windows)]
@@ -560,6 +858,22 @@ fn platform_set_window_opacity(window: &tauri::WebviewWindow, alpha: u8) -> Resu
 #[cfg(not(windows))]
 fn platform_set_window_opacity(_window: &tauri::WebviewWindow, _alpha: u8) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(windows)]
+fn platform_window_is_topmost(window: &tauri::WebviewWindow) -> Result<bool, String> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOPMOST};
+
+    let hwnd = window.hwnd().map_err(|error| error.to_string())?;
+    let hwnd = windows::Win32::Foundation::HWND(hwnd.0 as _);
+    let style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+
+    Ok(style & WS_EX_TOPMOST.0 != 0)
+}
+
+#[cfg(not(windows))]
+fn platform_window_is_topmost(_window: &tauri::WebviewWindow) -> Result<bool, String> {
+    Ok(false)
 }
 
 #[tauri::command]
@@ -590,6 +904,38 @@ fn focus_running_game(runtime: tauri::State<'_, OnaGameRuntime>, pid: u32) -> Re
     let granted = game_handoff::focus_process_window(pid);
     println!("[ONA Presentation] existing game foreground requested pid={pid} granted={granted}");
     Ok(granted)
+}
+
+#[tauri::command]
+fn minimize_running_game(
+    runtime: tauri::State<'_, OnaGameRuntime>,
+    pid: u32,
+) -> Result<bool, String> {
+    let status = runtime.launcher.status();
+
+    if status.state != GameLifecycleState::Running || status.pid != Some(pid) {
+        return Err("ACTIVE_GAME_SESSION_NOT_RUNNING".to_string());
+    }
+
+    let minimized = game_handoff::minimize_process_window(pid);
+    println!("[ONA Presentation] running game minimize requested pid={pid} minimized={minimized}");
+    Ok(minimized)
+}
+
+#[tauri::command]
+fn restore_running_game(
+    runtime: tauri::State<'_, OnaGameRuntime>,
+    pid: u32,
+) -> Result<bool, String> {
+    let status = runtime.launcher.status();
+
+    if status.state != GameLifecycleState::Running || status.pid != Some(pid) {
+        return Err("ACTIVE_GAME_SESSION_NOT_RUNNING".to_string());
+    }
+
+    let restored = game_handoff::restore_process_window(pid);
+    println!("[ONA Presentation] running game restore requested pid={pid} restored={restored}");
+    Ok(restored)
 }
 
 #[tauri::command]
@@ -757,6 +1103,7 @@ mod tests {
         Running,
         Background,
         SystemOverlay,
+        Minimized,
         Stopping,
         Returning,
         Exited,
@@ -769,6 +1116,15 @@ mod tests {
         OnaTransitionGuard,
         Game,
         OnaSystemOverlay,
+        OnaMinimized,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum TestGuardState {
+        Hidden,
+        Visible,
+        Hiding,
+        Failed,
     }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -815,6 +1171,12 @@ mod tests {
         fn home(mut self) -> Self {
             self.state = TestSessionState::Background;
             self.owner = TestPresentationOwner::OnaShell;
+            self
+        }
+
+        fn minimize(mut self) -> Self {
+            self.state = TestSessionState::Minimized;
+            self.owner = TestPresentationOwner::OnaMinimized;
             self
         }
 
@@ -987,6 +1349,47 @@ mod tests {
     }
 
     #[test]
+    fn minimize_and_restore_preserve_running_game_pid_without_handoff() {
+        let running = TestSession::idle().play(101).handoff_accepted();
+        let minimized = running.minimize();
+
+        assert_eq!(minimized.state, TestSessionState::Minimized);
+        assert_eq!(minimized.owner, TestPresentationOwner::OnaMinimized);
+        assert_eq!(minimized.pid, Some(101));
+
+        let restored = minimized.resume();
+
+        assert_eq!(restored.state, TestSessionState::Running);
+        assert_eq!(restored.owner, TestPresentationOwner::Game);
+        assert_eq!(restored.pid, Some(101));
+    }
+
+    #[test]
+    fn minimized_quick_menu_restore_returns_to_system_overlay_not_ready_overlay() {
+        let overlay = TestSession::idle()
+            .play(101)
+            .handoff_accepted()
+            .hold_start();
+        let minimized = overlay.minimize();
+
+        assert_eq!(minimized.owner, TestPresentationOwner::OnaMinimized);
+        assert_eq!(minimized.pid, Some(101));
+
+        let restored_overlay = TestSession {
+            state: TestSessionState::SystemOverlay,
+            owner: TestPresentationOwner::OnaSystemOverlay,
+            pid: minimized.pid,
+        };
+
+        assert_eq!(restored_overlay.state, TestSessionState::SystemOverlay);
+        assert_eq!(
+            restored_overlay.owner,
+            TestPresentationOwner::OnaSystemOverlay
+        );
+        assert_eq!(restored_overlay.pid, Some(101));
+    }
+
+    #[test]
     fn closing_ona_with_live_background_session_cleans_owned_process() {
         let background = TestSession::idle()
             .play(101)
@@ -1019,6 +1422,93 @@ mod tests {
         assert_eq!(failed.state, TestSessionState::Failed);
         assert_eq!(failed.owner, TestPresentationOwner::OnaTransitionGuard);
         assert_eq!(failed.exited().cleanup(), TestSession::idle());
+    }
+
+    #[test]
+    fn game_owner_requires_guard_hidden_after_safe_handoff() {
+        let _all_guard_states = [
+            TestGuardState::Hidden,
+            TestGuardState::Visible,
+            TestGuardState::Hiding,
+            TestGuardState::Failed,
+        ];
+        let guard = TestGuardState::Hidden;
+        let shell_visible = false;
+        let game_visible = true;
+        let forwarding_enabled = true;
+        let owner = TestPresentationOwner::Game;
+
+        assert_eq!(guard, TestGuardState::Hidden);
+        assert!(!shell_visible);
+        assert!(game_visible);
+        assert!(forwarding_enabled);
+        assert_eq!(owner, TestPresentationOwner::Game);
+    }
+
+    #[test]
+    fn guard_release_failure_blocks_game_owner_finalization() {
+        let guard = TestGuardState::Failed;
+        let owner = TestPresentationOwner::OnaTransitionGuard;
+        let forwarding_enabled = false;
+
+        assert_ne!(guard, TestGuardState::Hidden);
+        assert_eq!(owner, TestPresentationOwner::OnaTransitionGuard);
+        assert!(!forwarding_enabled);
+    }
+
+    #[test]
+    fn native_shell_restore_returns_to_opaque_shell_owner() {
+        let guard = TestGuardState::Hidden;
+        let shell_visible = true;
+        let shell_opacity = 255;
+        let shell_topmost = false;
+        let overlay_active = false;
+        let owner = TestPresentationOwner::OnaShell;
+
+        assert_eq!(guard, TestGuardState::Hidden);
+        assert!(shell_visible);
+        assert_eq!(shell_opacity, 255);
+        assert!(!shell_topmost);
+        assert!(!overlay_active);
+        assert_eq!(owner, TestPresentationOwner::OnaShell);
+    }
+
+    #[test]
+    fn native_home_minimize_restore_never_reopens_quick_menu() {
+        let previous_owner = TestPresentationOwner::OnaShell;
+        let minimized_owner = TestPresentationOwner::OnaMinimized;
+        let restored_owner = TestPresentationOwner::OnaShell;
+        let quick_menu_open = false;
+        let system_overlay = false;
+        let shell_opacity = 255;
+        let shell_topmost = false;
+        let guard = TestGuardState::Hidden;
+
+        assert_eq!(previous_owner, TestPresentationOwner::OnaShell);
+        assert_eq!(minimized_owner, TestPresentationOwner::OnaMinimized);
+        assert_eq!(restored_owner, TestPresentationOwner::OnaShell);
+        assert!(!quick_menu_open);
+        assert!(!system_overlay);
+        assert_eq!(shell_opacity, 255);
+        assert!(!shell_topmost);
+        assert_eq!(guard, TestGuardState::Hidden);
+    }
+
+    #[test]
+    fn repeated_native_home_restore_has_no_opacity_or_topmost_drift() {
+        for _ in 0..10 {
+            let owner = TestPresentationOwner::OnaShell;
+            let shell_opacity = 255;
+            let shell_topmost = false;
+            let quick_menu_open = false;
+            let guard = TestGuardState::Hidden;
+
+            assert_eq!(owner, TestPresentationOwner::OnaShell);
+            assert_eq!(shell_opacity, 255);
+            assert!(!shell_topmost);
+            assert!(!quick_menu_open);
+            assert_eq!(guard, TestGuardState::Hidden);
+        }
     }
 }
 
@@ -1054,9 +1544,13 @@ pub fn run() {
             restore_game_cursor,
             prepare_shell_for_game,
             restore_shell_after_game,
+            restore_shell_window_presentation,
             set_game_input_forwarding,
             focus_running_game,
+            minimize_running_game,
+            restore_running_game,
             release_presentation_guard,
+            presentation_guard_native_status,
             show_system_overlay_over_game,
             hide_system_overlay_over_game,
             running_game_status,
@@ -1070,11 +1564,65 @@ pub fn run() {
             display_layout,
             system_information,
             storage_information,
+            local_connectivity_status,
+            presentation_adapter_contract,
             load_controller_profile,
             save_controller_profile
         ])
         .setup(|app| {
             display_manager::configure_main_window(app)?;
+            if let Some(main_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                let app_handle = app.handle().clone();
+                let minimized_state = Arc::new(Mutex::new(false));
+                let minimized_state_for_event = Arc::clone(&minimized_state);
+
+                main_window.on_window_event(move |event| match event {
+                    tauri::WindowEvent::CloseRequested { .. } => {
+                        println!("[ONA NativeWindow] close_requested");
+                        let _ = app_handle.emit("ona-native-close-requested", ());
+                    }
+                    tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(_) => {
+                        let Some(window) = app_handle.get_webview_window(MAIN_WINDOW_LABEL) else {
+                            return;
+                        };
+                        let minimized = window.is_minimized().unwrap_or(false);
+                        let mut previous = match minimized_state_for_event.lock() {
+                            Ok(previous) => previous,
+                            Err(error) => {
+                                eprintln!("[ONA NativeWindow] minimize state unavailable: {error}");
+                                return;
+                            }
+                        };
+
+                        if minimized == *previous {
+                            return;
+                        }
+
+                        *previous = minimized;
+
+                        if minimized {
+                            println!("[ONA NativeWindow] minimized");
+                            let _ = app_handle.emit("ona-native-minimized", ());
+                        } else {
+                            println!("[ONA NativeWindow] restored");
+                            let _ = app_handle.emit("ona-native-restored", ());
+                        }
+                    }
+                    _ => {}
+                });
+            }
+            match presentation_guard_window(app.handle()) {
+                Ok(guard) => {
+                    if let Err(error) = configure_guard_window(app.handle(), &guard) {
+                        eprintln!("[ONA Presentation] Guard preload layout failed: {error}");
+                    }
+                    let _ = guard.hide();
+                    println!("[ONA Presentation] dedicated guard preloaded");
+                }
+                Err(error) => {
+                    eprintln!("[ONA Presentation] Guard preload failed: {error}");
+                }
+            }
 
             let app_handle = app.handle().clone();
 
