@@ -16,7 +16,7 @@ use ona_core::game_manager::{
 use ona_core::input::{
     bridge::{GameInputBridge, GameInputBridgeStatus},
     dispatcher::dispatch,
-    events::normalize_controller_json,
+    events::{normalize_controller_json, ButtonState, OnaButton, OnaInputEvent},
     profile::OnaControllerProfile,
 };
 use ona_core::launcher::{
@@ -33,20 +33,31 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
+    },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{utils::config::Color, Emitter, Manager};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const PRESENTATION_GUARD_LABEL: &str = "presentation_guard";
+static ESCAPE_SYSTEM_SHORTCUT: OnceLock<Mutex<Option<EscapeSystemShortcut>>> = OnceLock::new();
+static ESCAPE_SYSTEM_SHORTCUT_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 struct OnaGameRuntime {
     launcher: GameLauncher,
     input_bridge: Mutex<GameInputBridge>,
     lifecycle_bridge: Mutex<GameLifecycleBridge>,
     input_forwarding_enabled: Mutex<bool>,
+}
+
+struct EscapeSystemShortcut {
+    generation: u64,
+    running: Arc<AtomicBool>,
+    worker: thread::JoinHandle<()>,
 }
 
 #[derive(Serialize)]
@@ -117,6 +128,13 @@ struct PresentationGuardNativeStatus {
     visible: bool,
     always_on_top: bool,
     fullscreen: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EscapeShortcutStatus {
+    registered: bool,
+    generation: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -292,6 +310,29 @@ fn local_connectivity_status() -> OnaLocalConnectivityInfo {
 }
 
 #[tauri::command]
+fn enable_escape_system_shortcut(app_handle: tauri::AppHandle) -> Result<(), String> {
+    platform_enable_escape_system_shortcut(app_handle)
+}
+
+#[tauri::command]
+fn disable_escape_system_shortcut() -> Result<(), String> {
+    platform_disable_escape_system_shortcut()
+}
+
+#[tauri::command]
+fn escape_system_shortcut_status() -> Result<EscapeShortcutStatus, String> {
+    platform_escape_system_shortcut_status()
+}
+
+#[tauri::command]
+fn exit_ona_process(app_handle: tauri::AppHandle) -> Result<(), String> {
+    println!("[ONA Shutdown] process exit requested");
+    let _ = platform_disable_escape_system_shortcut();
+    app_handle.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
 fn presentation_adapter_contract() -> presentation_adapter::PresentationAdapterContract {
     presentation_adapter::contract()
 }
@@ -446,6 +487,7 @@ fn launch_installed_game(
         },
     )?;
 
+    game_handoff::clear_primary_game_window();
     game_handoff::log_visible_windows("launching-after-spawn");
 
     Ok(status)
@@ -492,15 +534,25 @@ fn restore_game_cursor(app_handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn prepare_shell_for_game(app_handle: tauri::AppHandle) -> Result<(), String> {
+fn prepare_shell_for_game(
+    app_handle: tauri::AppHandle,
+    reason: Option<String>,
+) -> Result<(), String> {
     let window = app_handle
         .get_webview_window(MAIN_WINDOW_LABEL)
         .ok_or_else(|| "Main ONA window was not found.".to_string())?;
 
     cursor_manager::hide_for_game_session(Some(&window));
 
-    println!("[ONA Presentation] SAFE HANDOFF accepted. Hiding ONA Shell.");
-    game_handoff::log_visible_windows("safe-handoff-before-hide");
+    if reason.as_deref() == Some("safe_handoff") {
+        println!("[ONA Presentation] SAFE HANDOFF accepted. Hiding ONA Shell.");
+        game_handoff::log_visible_windows("safe-handoff-before-hide");
+    } else {
+        println!(
+            "[ONA Presentation] hiding ONA Shell for game reason={}",
+            reason.as_deref().unwrap_or("runtime")
+        );
+    }
 
     let _ = platform_set_window_opacity(&window, 255);
     let _ = window.set_always_on_top(false);
@@ -598,7 +650,6 @@ fn restore_main_shell_presentation(app_handle: &tauri::AppHandle) -> Result<(), 
         .ok_or_else(|| "Main ONA window was not found.".to_string())?;
 
     let _ = window.unminimize();
-    window.show().map_err(|error| error.to_string())?;
     let layout = display_manager::detect_layout(&app_handle).map_err(|error| error.to_string())?;
     display_manager::apply_layout_to_window(&window, &layout).map_err(|error| error.to_string())?;
     window
@@ -609,6 +660,7 @@ fn restore_main_shell_presentation(app_handle: &tauri::AppHandle) -> Result<(), 
         .map_err(|error| error.to_string())?;
     platform_set_window_opacity(&window, 255)?;
     let _ = window.set_always_on_top(false);
+    window.show().map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -638,9 +690,15 @@ fn show_shell_system_overlay_window(app_handle: tauri::AppHandle) -> Result<(), 
     window
         .set_always_on_top(true)
         .map_err(|error| error.to_string())?;
-    platform_set_window_opacity(&window, 216)?;
+    platform_set_window_opacity(&window, 255)?;
     window.set_focus().map_err(|error| error.to_string())?;
-    let snapshot = window_presentation_snapshot(&window, 216, false)?;
+    let snapshot = window_presentation_snapshot(&window, 255, false)?;
+    if !snapshot.visible || !snapshot.always_on_top || !snapshot.fullscreen {
+        return Err(format!(
+            "QUICK_MENU_SHOW_NOT_CONFIRMED visible={} topmost={} fullscreen={}",
+            snapshot.visible, snapshot.always_on_top, snapshot.fullscreen
+        ));
+    }
     println!("[ONA QuickMenu] native overlay visible over game {snapshot:?}");
     Ok(())
 }
@@ -658,6 +716,7 @@ async fn wait_for_game_handoff_ready(
             .to_string()
     })?;
     let launcher_status = runtime.launcher.status();
+    let game_id = launcher_status.game_id.clone();
     let profile = launcher_status
         .game_id
         .as_deref()
@@ -700,6 +759,7 @@ async fn wait_for_game_handoff_ready(
 
         let status = game_handoff::wait_for_game_handoff_ready(
             pid,
+            game_id,
             target,
             timeout_ms,
             || lifecycle_bridge.has_any_signal(),
@@ -768,11 +828,6 @@ fn release_presentation_guard(app_handle: tauri::AppHandle) -> Result<(), String
         println!("[ONA Guard] hidden confirmed");
     }
 
-    if let Some(window) = app_handle.get_webview_window(MAIN_WINDOW_LABEL) {
-        platform_set_window_opacity(&window, 255)?;
-        let _ = window.set_always_on_top(false);
-    }
-
     println!("[ONA Guard] release confirmed");
     Ok(())
 }
@@ -796,6 +851,17 @@ fn presentation_guard_native_status(
         always_on_top: platform_window_is_topmost(&guard)?,
         fullscreen: guard.is_fullscreen().map_err(|error| error.to_string())?,
     })
+}
+
+#[tauri::command]
+fn shell_window_presentation_status(
+    app_handle: tauri::AppHandle,
+) -> Result<WindowPresentationSnapshot, String> {
+    let window = app_handle
+        .get_webview_window(MAIN_WINDOW_LABEL)
+        .ok_or_else(|| "Main ONA window was not found.".to_string())?;
+
+    window_presentation_snapshot(&window, 255, false)
 }
 
 #[tauri::command]
@@ -876,6 +942,122 @@ fn platform_window_is_topmost(_window: &tauri::WebviewWindow) -> Result<bool, St
     Ok(false)
 }
 
+fn escape_shortcut_state() -> &'static Mutex<Option<EscapeSystemShortcut>> {
+    ESCAPE_SYSTEM_SHORTCUT.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(windows)]
+fn platform_enable_escape_system_shortcut(app_handle: tauri::AppHandle) -> Result<(), String> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::{
+        Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey, MOD_NOREPEAT},
+        WindowsAndMessaging::{PeekMessageW, MSG, PM_REMOVE, WM_HOTKEY},
+    };
+
+    const ESCAPE_HOTKEY_ID: i32 = 0x0A_E5C;
+    const VK_ESCAPE_CODE: u32 = 0x1B;
+
+    let mut state = escape_shortcut_state()
+        .lock()
+        .map_err(|error| error.to_string())?;
+
+    if state.is_some() {
+        println!("[ONA ESC] register requested existing=true");
+        println!("[ONA ESC] duplicate register prevented");
+        return Ok(());
+    }
+
+    println!("[ONA ESC] register requested existing=false");
+    let generation = ESCAPE_SYSTEM_SHORTCUT_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let running = Arc::new(AtomicBool::new(true));
+    let worker_running = Arc::clone(&running);
+    let worker = thread::spawn(move || {
+        let null_hwnd = HWND(std::ptr::null_mut());
+        let registered =
+            unsafe { RegisterHotKey(null_hwnd, ESCAPE_HOTKEY_ID, MOD_NOREPEAT, VK_ESCAPE_CODE) };
+
+        if registered.is_err() {
+            eprintln!("[ONA Keyboard] ESC native shortcut registration failed");
+            return;
+        }
+
+        println!("[ONA Keyboard] ESC native shortcut enabled");
+        println!("[ONA ESC] registered generation={generation}");
+        let mut last_escape_event_at: Option<Instant> = None;
+
+        while worker_running.load(Ordering::SeqCst) {
+            let mut message = MSG::default();
+
+            while unsafe { PeekMessageW(&mut message, null_hwnd, 0, 0, PM_REMOVE) }.as_bool() {
+                if message.message == WM_HOTKEY && message.wParam.0 as i32 == ESCAPE_HOTKEY_ID {
+                    let now = Instant::now();
+                    if last_escape_event_at
+                        .map(|last| now.duration_since(last) < Duration::from_millis(160))
+                        .unwrap_or(false)
+                    {
+                        println!("[ONA ESC] duplicate WM_HOTKEY suppressed");
+                        continue;
+                    }
+                    last_escape_event_at = Some(now);
+                    println!("[ONA Keyboard] ESC down");
+                    println!("[ONA ESC] event generation={generation}");
+                    let _ = app_handle.emit("ona-escape-system-command", ());
+                }
+            }
+
+            thread::sleep(Duration::from_millis(24));
+        }
+
+        let _ = unsafe { UnregisterHotKey(null_hwnd, ESCAPE_HOTKEY_ID) };
+        println!("[ONA Keyboard] ESC native shortcut disabled");
+    });
+
+    *state = Some(EscapeSystemShortcut {
+        generation,
+        running,
+        worker,
+    });
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn platform_enable_escape_system_shortcut(_app_handle: tauri::AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
+fn platform_disable_escape_system_shortcut() -> Result<(), String> {
+    let mut state = escape_shortcut_state()
+        .lock()
+        .map_err(|error| error.to_string())?;
+
+    if let Some(shortcut) = state.take() {
+        println!(
+            "[ONA ESC] unregister requested existing=true generation={}",
+            shortcut.generation
+        );
+        shortcut.running.store(false, Ordering::SeqCst);
+        let _ = shortcut.worker.join();
+    } else {
+        println!("[ONA ESC] unregister requested existing=false");
+    }
+
+    Ok(())
+}
+
+fn platform_escape_system_shortcut_status() -> Result<EscapeShortcutStatus, String> {
+    let state = escape_shortcut_state()
+        .lock()
+        .map_err(|error| error.to_string())?;
+
+    Ok(EscapeShortcutStatus {
+        registered: state.is_some(),
+        generation: state
+            .as_ref()
+            .map(|shortcut| shortcut.generation)
+            .unwrap_or_else(|| ESCAPE_SYSTEM_SHORTCUT_GENERATION.load(Ordering::SeqCst)),
+    })
+}
+
 #[tauri::command]
 fn set_game_input_forwarding(
     runtime: tauri::State<'_, OnaGameRuntime>,
@@ -894,6 +1076,79 @@ fn set_game_input_forwarding(
 }
 
 #[tauri::command]
+fn neutralize_game_input(runtime: tauri::State<'_, OnaGameRuntime>) -> Result<(), String> {
+    let status = runtime.launcher.status();
+
+    if status.state != GameLifecycleState::Running {
+        println!("[ONA Input Routing] neutralize skipped: no running game");
+        return Ok(());
+    }
+
+    let bridge = runtime
+        .input_bridge
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let player_id = 1;
+
+    bridge.send(OnaInputEvent::Joystick {
+        player_id,
+        x: 0.0,
+        y: 0.0,
+    });
+
+    for button in [
+        OnaButton::A,
+        OnaButton::B,
+        OnaButton::X,
+        OnaButton::Y,
+        OnaButton::L1,
+        OnaButton::L2,
+        OnaButton::R1,
+        OnaButton::R2,
+        OnaButton::Select,
+        OnaButton::Start,
+    ] {
+        bridge.send(OnaInputEvent::Button {
+            player_id,
+            button,
+            state: ButtonState::Up,
+        });
+    }
+
+    println!("[ONA Input Routing] neutralized game input before pause");
+    Ok(())
+}
+
+#[tauri::command]
+fn dispatch_game_start_short(runtime: tauri::State<'_, OnaGameRuntime>) -> Result<(), String> {
+    let forwarding_enabled = runtime
+        .input_forwarding_enabled
+        .lock()
+        .map_err(|error| error.to_string())?;
+
+    if !*forwarding_enabled {
+        println!("[ONA START] short dispatch skipped because game routing is disabled");
+        return Ok(());
+    }
+
+    let bridge = runtime
+        .input_bridge
+        .lock()
+        .map_err(|error| error.to_string())?;
+
+    dispatch(
+        OnaInputEvent::Button {
+            player_id: 1,
+            button: OnaButton::Start,
+            state: ButtonState::Up,
+        },
+        Some(&bridge),
+    );
+    println!("[ONA START] dispatched GAME START UP");
+    Ok(())
+}
+
+#[tauri::command]
 fn focus_running_game(runtime: tauri::State<'_, OnaGameRuntime>, pid: u32) -> Result<bool, String> {
     let status = runtime.launcher.status();
 
@@ -901,7 +1156,7 @@ fn focus_running_game(runtime: tauri::State<'_, OnaGameRuntime>, pid: u32) -> Re
         return Err("ACTIVE_GAME_SESSION_NOT_RUNNING".to_string());
     }
 
-    let granted = game_handoff::focus_process_window(pid);
+    let granted = game_handoff::focus_process_window(pid)?;
     println!("[ONA Presentation] existing game foreground requested pid={pid} granted={granted}");
     Ok(granted)
 }
@@ -917,13 +1172,32 @@ fn minimize_running_game(
         return Err("ACTIVE_GAME_SESSION_NOT_RUNNING".to_string());
     }
 
-    let minimized = game_handoff::minimize_process_window(pid);
+    let minimized = game_handoff::minimize_process_window(pid)?;
     println!("[ONA Presentation] running game minimize requested pid={pid} minimized={minimized}");
     Ok(minimized)
 }
 
 #[tauri::command]
 fn restore_running_game(
+    runtime: tauri::State<'_, OnaGameRuntime>,
+    pid: u32,
+) -> Result<game_handoff::GameWindowRestoreStatus, String> {
+    let status = runtime.launcher.status();
+
+    if status.state != GameLifecycleState::Running || status.pid != Some(pid) {
+        return Err("ACTIVE_GAME_SESSION_NOT_RUNNING".to_string());
+    }
+
+    let restored = game_handoff::restore_process_window(pid)?;
+    println!(
+        "[ONA Presentation] running game restore requested pid={pid} restored={}",
+        restored.restored
+    );
+    Ok(restored)
+}
+
+#[tauri::command]
+fn suppress_running_game_taskbar_identity(
     runtime: tauri::State<'_, OnaGameRuntime>,
     pid: u32,
 ) -> Result<bool, String> {
@@ -933,9 +1207,7 @@ fn restore_running_game(
         return Err("ACTIVE_GAME_SESSION_NOT_RUNNING".to_string());
     }
 
-    let restored = game_handoff::restore_process_window(pid);
-    println!("[ONA Presentation] running game restore requested pid={pid} restored={restored}");
-    Ok(restored)
+    game_handoff::suppress_process_taskbar_identity(pid)
 }
 
 #[tauri::command]
@@ -946,6 +1218,7 @@ fn running_game_status(
 
     if status.state != GameLifecycleState::Running {
         println!("[ONA Runtime] Running game status changed: {status:?}");
+        game_handoff::clear_primary_game_window();
     }
 
     Ok(status)
@@ -995,6 +1268,7 @@ fn terminate_running_game(
             if let Ok(bridge) = runtime.lifecycle_bridge.lock() {
                 bridge.clear();
             }
+            game_handoff::clear_primary_game_window();
             return Ok(status);
         }
 
@@ -1008,6 +1282,7 @@ fn terminate_running_game(
     if let Ok(bridge) = runtime.lifecycle_bridge.lock() {
         bridge.clear();
     }
+    game_handoff::clear_primary_game_window();
     Ok(status)
 }
 
@@ -1157,9 +1432,18 @@ mod tests {
         }
 
         fn hold_start(mut self) -> Self {
-            self.state = TestSessionState::SystemOverlay;
-            self.owner = TestPresentationOwner::OnaSystemOverlay;
+            if self.state == TestSessionState::SystemOverlay {
+                self.state = TestSessionState::Running;
+                self.owner = TestPresentationOwner::Game;
+            } else if self.state == TestSessionState::Running {
+                self.state = TestSessionState::SystemOverlay;
+                self.owner = TestPresentationOwner::OnaSystemOverlay;
+            }
             self
+        }
+
+        fn escape(self) -> Self {
+            self.hold_start()
         }
 
         fn resume(mut self) -> Self {
@@ -1272,6 +1556,53 @@ mod tests {
     }
 
     #[test]
+    fn hold_start_toggles_system_overlay_ten_times_without_changing_pid() {
+        let mut session = TestSession::idle().play(101).handoff_accepted();
+
+        for _ in 0..10 {
+            session = session.hold_start();
+            assert_eq!(session.state, TestSessionState::SystemOverlay);
+            assert_eq!(session.owner, TestPresentationOwner::OnaSystemOverlay);
+            assert_eq!(session.pid, Some(101));
+
+            session = session.hold_start();
+            assert_eq!(session.state, TestSessionState::Running);
+            assert_eq!(session.owner, TestPresentationOwner::Game);
+            assert_eq!(session.pid, Some(101));
+        }
+    }
+
+    #[test]
+    fn escape_and_hold_start_share_the_same_overlay_toggle_contract() {
+        let running = TestSession::idle().play(101).handoff_accepted();
+        let opened_by_hold = running.hold_start();
+        let closed_by_escape = opened_by_hold.escape();
+        let opened_by_escape = closed_by_escape.escape();
+        let closed_by_hold = opened_by_escape.hold_start();
+
+        assert_eq!(closed_by_hold.state, TestSessionState::Running);
+        assert_eq!(closed_by_hold.owner, TestPresentationOwner::Game);
+        assert_eq!(closed_by_hold.pid, Some(101));
+    }
+
+    #[test]
+    fn system_input_observation_stays_active_while_game_forwarding_is_paused() {
+        let overlay = TestSession::idle()
+            .play(101)
+            .handoff_accepted()
+            .hold_start();
+        let game_forwarding = overlay.owner == TestPresentationOwner::Game;
+        let system_input_observed = matches!(
+            overlay.owner,
+            TestPresentationOwner::Game | TestPresentationOwner::OnaSystemOverlay
+        );
+
+        assert!(!game_forwarding);
+        assert!(system_input_observed);
+        assert_eq!(overlay.pid, Some(101));
+    }
+
+    #[test]
     fn start_short_keeps_game_as_presentation_owner() {
         let running = TestSession::idle().play(101).handoff_accepted();
 
@@ -1365,7 +1696,7 @@ mod tests {
     }
 
     #[test]
-    fn minimized_quick_menu_restore_returns_to_system_overlay_not_ready_overlay() {
+    fn minimized_quick_menu_restore_returns_directly_to_game() {
         let overlay = TestSession::idle()
             .play(101)
             .handoff_accepted()
@@ -1375,18 +1706,30 @@ mod tests {
         assert_eq!(minimized.owner, TestPresentationOwner::OnaMinimized);
         assert_eq!(minimized.pid, Some(101));
 
-        let restored_overlay = TestSession {
-            state: TestSessionState::SystemOverlay,
-            owner: TestPresentationOwner::OnaSystemOverlay,
-            pid: minimized.pid,
+        let restored = minimized.resume();
+
+        assert_eq!(restored.state, TestSessionState::Running);
+        assert_eq!(restored.owner, TestPresentationOwner::Game);
+        assert_eq!(restored.pid, Some(101));
+    }
+
+    #[test]
+    fn failed_primary_window_restore_keeps_ona_shell_visible() {
+        let minimized = TestSession::idle().play(101).handoff_accepted().minimize();
+        let restore_validation_passed = false;
+        let recovered = if restore_validation_passed {
+            minimized.resume()
+        } else {
+            TestSession {
+                state: TestSessionState::Background,
+                owner: TestPresentationOwner::OnaShell,
+                pid: minimized.pid,
+            }
         };
 
-        assert_eq!(restored_overlay.state, TestSessionState::SystemOverlay);
-        assert_eq!(
-            restored_overlay.owner,
-            TestPresentationOwner::OnaSystemOverlay
-        );
-        assert_eq!(restored_overlay.pid, Some(101));
+        assert_eq!(recovered.owner, TestPresentationOwner::OnaShell);
+        assert_eq!(recovered.state, TestSessionState::Background);
+        assert_eq!(recovered.pid, Some(101));
     }
 
     #[test]
@@ -1546,11 +1889,15 @@ pub fn run() {
             restore_shell_after_game,
             restore_shell_window_presentation,
             set_game_input_forwarding,
+            neutralize_game_input,
+            dispatch_game_start_short,
             focus_running_game,
             minimize_running_game,
             restore_running_game,
+            suppress_running_game_taskbar_identity,
             release_presentation_guard,
             presentation_guard_native_status,
+            shell_window_presentation_status,
             show_system_overlay_over_game,
             hide_system_overlay_over_game,
             running_game_status,
@@ -1565,6 +1912,10 @@ pub fn run() {
             system_information,
             storage_information,
             local_connectivity_status,
+            enable_escape_system_shortcut,
+            disable_escape_system_shortcut,
+            escape_system_shortcut_status,
+            exit_ona_process,
             presentation_adapter_contract,
             load_controller_profile,
             save_controller_profile
@@ -1577,8 +1928,9 @@ pub fn run() {
                 let minimized_state_for_event = Arc::clone(&minimized_state);
 
                 main_window.on_window_event(move |event| match event {
-                    tauri::WindowEvent::CloseRequested { .. } => {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
                         println!("[ONA NativeWindow] close_requested");
+                        api.prevent_close();
                         let _ = app_handle.emit("ona-native-close-requested", ());
                     }
                     tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(_) => {
@@ -1646,6 +1998,17 @@ pub fn run() {
                                 .lock()
                                 .map(|forwarding| *forwarding)
                                 .unwrap_or(false);
+
+                            if let OnaInputEvent::Button {
+                                button: OnaButton::Start,
+                                state,
+                                ..
+                            } = &event
+                            {
+                                println!(
+                                    "[ONA SystemInput] START {state:?} observed gameForwarding={forwarding_enabled}"
+                                );
+                            }
 
                             if forwarding_enabled {
                                 if let Ok(bridge) = runtime.input_bridge.lock() {

@@ -7539,30 +7539,27 @@ body[data-visual-intensity="low"] #ona-shell {
     pointer-events: auto;
 }
 
-body.game-system-overlay #ona-shell,
-body.game-system-overlay .ona-footer {
-    visibility: hidden;
-}
-
 body.game-system-overlay .system-menu {
     background:
         rgba(
             0,
             0,
             0,
-            0.38
+            0.78
         );
 
-    backdrop-filter: none;
+    backdrop-filter:
+        blur(10px);
+
+    transition: none;
 }
 
 body.game-system-overlay .system-menu-panel {
     background:
-        rgba(
+        rgb(
             5,
             13,
-            22,
-            0.88
+            22
         );
 }
 

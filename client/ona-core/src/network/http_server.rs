@@ -86,7 +86,7 @@ async fn controller_no_cache(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("no-store, no-cache, must-revalidate, max-age=0"),
+        HeaderValue::from_static("no-cache, must-revalidate"),
     );
     response
         .headers_mut()

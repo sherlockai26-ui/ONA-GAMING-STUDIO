@@ -46,6 +46,19 @@ The Host Presentation Adapter is the platform-facing contract for window ownersh
 
 Windows currently uses native HWND operations. Other hosts must provide equivalent process-window operations without changing the Game Manifest, Game Manager, Launcher, Lifecycle, Input Bridge, or Native Game contracts.
 
+## Cursor Mode
+
+Cursor ownership is explicit and scoped to the gaming display/game window. ONA must not use global cursor hacks such as a permanent `ShowCursor` loop, global mouse hooks, or permanent `ClipCursor`.
+
+Runtime V1 cursor modes:
+
+- `HIDDEN`: default for `PresentationOwner=GAME` with console fullscreen. ONA Host hides its shell cursor and the game adapter must hide the cursor in the native game window.
+- `GAME_CONTROLLED`: the game owns cursor visibility for gameplay that intentionally uses a pointer.
+- `SYSTEM_OVERLAY`: ONA owns cursor behavior while a system overlay such as Quick Menu is visible.
+- `SHELL`: ONA Shell owns cursor behavior for Home, Library, Settings, Store, and mouse-driven shell UX.
+
+Future ONA Game Presentation Adapter implementations must accept `CURSOR_MODE=HIDDEN` through the adapter/runtime command channel and apply the engine/window equivalent of `window.set_cursor_visible(false)` or its native API. GAME ONA 001 is not changed by this host contract update.
+
 ## Quick Menu
 
 HOLD START is an ONA system command while a native game is running.

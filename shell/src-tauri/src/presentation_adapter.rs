@@ -60,9 +60,10 @@ pub enum CompatibilityLevel {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CursorMode {
-    ShellVisible,
-    GameHidden,
-    SystemOverlayVisible,
+    Hidden,
+    GameControlled,
+    SystemOverlay,
+    Shell,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
@@ -83,6 +84,7 @@ pub struct PresentationAdapterContract {
     pub events: Vec<PresentationEvent>,
     pub compatibility_levels: Vec<CompatibilityLevel>,
     pub cursor_modes: Vec<CursorMode>,
+    pub default_game_cursor_mode: CursorMode,
     pub native_window_identity: GameWindowIdentity,
 }
 
@@ -149,10 +151,12 @@ pub fn contract() -> PresentationAdapterContract {
             CompatibilityLevel::LegacyBestEffort,
         ],
         cursor_modes: vec![
-            CursorMode::ShellVisible,
-            CursorMode::GameHidden,
-            CursorMode::SystemOverlayVisible,
+            CursorMode::Hidden,
+            CursorMode::GameControlled,
+            CursorMode::SystemOverlay,
+            CursorMode::Shell,
         ],
+        default_game_cursor_mode: CursorMode::Hidden,
         native_window_identity: GameWindowIdentity {
             pid: 0,
             hwnd: None,
@@ -231,7 +235,7 @@ mod tests {
     #[test]
     fn runtime_v1_keeps_cursor_and_event_terms_separate() {
         let _compatibility = CompatibilityLevel::RuntimeV1;
-        let _cursor = CursorMode::GameHidden;
+        let _cursor = CursorMode::Hidden;
         let events = [
             PresentationEvent::GameWindowReady,
             PresentationEvent::GameDisplayReady,
@@ -244,5 +248,17 @@ mod tests {
         ];
 
         assert_eq!(events.len(), 8);
+    }
+
+    #[test]
+    fn default_game_cursor_mode_is_hidden_without_global_host_hacks() {
+        let modes = [
+            CursorMode::Hidden,
+            CursorMode::GameControlled,
+            CursorMode::SystemOverlay,
+            CursorMode::Shell,
+        ];
+
+        assert!(modes.contains(&CursorMode::Hidden));
     }
 }

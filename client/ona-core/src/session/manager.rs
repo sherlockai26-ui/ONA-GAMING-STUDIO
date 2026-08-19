@@ -25,6 +25,7 @@ pub enum ControllerConnectionState {
 pub struct PairedController {
     pub session_id: String,
     pub token: String,
+    pub device_id: Option<String>,
     pub player_id: u8,
     pub state: ControllerConnectionState,
 }
@@ -57,9 +58,23 @@ pub fn create_session() -> ControllerSession {
 
     println!("Session created:");
     println!("ID: {}", session.id);
-    println!("TOKEN: {}", session.token.value);
+    println!("TOKEN: {}", redact_token(&session.token.value));
 
     session
+}
+
+fn redact_token(value: &str) -> String {
+    let prefix: String = value.chars().take(4).collect();
+    let suffix: String = value
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+
+    format!("{prefix}****{suffix}")
 }
 
 pub fn persistent_pairing_session() -> ControllerSession {
@@ -87,7 +102,11 @@ pub fn reset_pairing_session(reason: &str) -> ControllerSession {
     session.clone()
 }
 
-pub fn authenticate_controller(session_id: &str, token: &str) -> Result<PairedController, String> {
+pub fn authenticate_controller(
+    session_id: &str,
+    token: &str,
+    device_id: Option<&str>,
+) -> Result<PairedController, String> {
     let session = persistent_pairing_session();
 
     if session.id != session_id || session.token.value != token {
@@ -99,11 +118,14 @@ pub fn authenticate_controller(session_id: &str, token: &str) -> Result<PairedCo
         .lock()
         .map_err(|error| error.to_string())?;
 
-    if let Some(controller) = controllers.get_mut(session_id) {
+    let controller_key = pairing_key(session_id, device_id);
+
+    if let Some(controller) = controllers.get_mut(&controller_key) {
         controller.state = ControllerConnectionState::Connected;
         println!(
-            "[ONA Controller] reconnect authenticated player={}",
-            controller.player_id
+            "[ONA Controller] reconnect authenticated player={} device={}",
+            controller.player_id,
+            controller.device_id.as_deref().unwrap_or("legacy")
         );
         return Ok(controller.clone());
     }
@@ -112,28 +134,43 @@ pub fn authenticate_controller(session_id: &str, token: &str) -> Result<PairedCo
     let controller = PairedController {
         session_id: session_id.to_string(),
         token: token.to_string(),
+        device_id: device_id.map(str::to_string),
         player_id,
         state: ControllerConnectionState::Connected,
     };
 
-    controllers.insert(session_id.to_string(), controller.clone());
-    println!("[ONA Controller] paired session={session_id} player={player_id}");
+    controllers.insert(controller_key, controller.clone());
+    println!(
+        "[ONA Controller] paired session={session_id} player={player_id} device={}",
+        controller.device_id.as_deref().unwrap_or("legacy")
+    );
 
     Ok(controller)
 }
 
-pub fn mark_controller_disconnected(session_id: &str) -> Option<PairedController> {
+pub fn mark_controller_disconnected(
+    session_id: &str,
+    device_id: Option<&str>,
+) -> Option<PairedController> {
     let mut controllers = paired_controllers().lock().ok()?;
-    let controller = controllers.get_mut(session_id)?;
+    let controller = controllers.get_mut(&pairing_key(session_id, device_id))?;
     controller.state = ControllerConnectionState::DisconnectedTemporary;
     println!(
-        "[ONA Controller] websocket disconnected player={}",
-        controller.player_id
+        "[ONA Controller] websocket disconnected player={} device={}",
+        controller.player_id,
+        controller.device_id.as_deref().unwrap_or("legacy")
     );
     println!("[ONA Controller] pairing retained");
     println!("[ONA Controller] waiting for reconnect");
 
     Some(controller.clone())
+}
+
+fn pairing_key(session_id: &str, device_id: Option<&str>) -> String {
+    match device_id.filter(|id| !id.trim().is_empty()) {
+        Some(id) => format!("{session_id}::{id}"),
+        None => session_id.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -162,10 +199,10 @@ mod tests {
     fn websocket_drop_retains_pairing_session() {
         clear_persistent_pairings_for_tests();
         let session = persistent_pairing_session();
-        let paired = authenticate_controller(&session.id, &session.token.value)
+        let paired = authenticate_controller(&session.id, &session.token.value, None)
             .expect("controller should pair");
 
-        let disconnected = mark_controller_disconnected(&session.id)
+        let disconnected = mark_controller_disconnected(&session.id, None)
             .expect("paired controller should be marked disconnected");
 
         assert_eq!(paired.player_id, disconnected.player_id);
@@ -184,11 +221,11 @@ mod tests {
     fn reconnect_restores_same_player_id() {
         clear_persistent_pairings_for_tests();
         let session = persistent_pairing_session();
-        let first = authenticate_controller(&session.id, &session.token.value)
+        let first = authenticate_controller(&session.id, &session.token.value, None)
             .expect("controller should pair");
-        let _ = mark_controller_disconnected(&session.id);
+        let _ = mark_controller_disconnected(&session.id, None);
 
-        let resumed = authenticate_controller(&session.id, &session.token.value)
+        let resumed = authenticate_controller(&session.id, &session.token.value, None)
             .expect("controller should resume");
 
         assert_eq!(resumed.player_id, first.player_id);
@@ -200,11 +237,43 @@ mod tests {
         clear_persistent_pairings_for_tests();
         let session = persistent_pairing_session();
 
-        assert!(authenticate_controller(&session.id, "WRONG").is_err());
+        assert!(authenticate_controller(&session.id, "WRONG", None).is_err());
         assert_eq!(persistent_pairing_session().id, session.id);
         assert_eq!(
             persistent_pairing_session().token.value,
             session.token.value
         );
+    }
+
+    #[test]
+    fn device_id_gets_independent_player_slot_with_same_pairing() {
+        clear_persistent_pairings_for_tests();
+        let session = persistent_pairing_session();
+
+        let first =
+            authenticate_controller(&session.id, &session.token.value, Some("ona-device-a"))
+                .expect("first device should pair");
+        let second =
+            authenticate_controller(&session.id, &session.token.value, Some("ona-device-b"))
+                .expect("second device should pair");
+
+        assert_eq!(first.player_id, 1);
+        assert_eq!(second.player_id, 2);
+    }
+
+    #[test]
+    fn reconnect_by_device_id_restores_same_player_slot() {
+        clear_persistent_pairings_for_tests();
+        let session = persistent_pairing_session();
+        let first =
+            authenticate_controller(&session.id, &session.token.value, Some("ona-device-a"))
+                .expect("device should pair");
+        let _ = mark_controller_disconnected(&session.id, Some("ona-device-a"));
+
+        let resumed =
+            authenticate_controller(&session.id, &session.token.value, Some("ona-device-a"))
+                .expect("device should resume");
+
+        assert_eq!(resumed.player_id, first.player_id);
     }
 }

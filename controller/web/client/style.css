@@ -41,7 +41,7 @@ body {
         Helvetica,
         sans-serif;
 
-    touch-action: manipulation;
+    touch-action: none;
 
     overscroll-behavior: none;
 }
@@ -104,6 +104,19 @@ body {
             #07111d 50%,
             #02050a 100%
         );
+
+    opacity: 1;
+    transition: opacity 120ms ease;
+}
+
+body.controller-booting #controller {
+    opacity: 0;
+    pointer-events: none;
+}
+
+body.controller-ready #controller {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 
@@ -266,25 +279,14 @@ body[data-connection-state="session expired"] .connection-status {
    ========================= */
 
 .system-buttons {
-    position: absolute;
-
-    top: clamp(30px, 8dvh, 48px);
-
-    left: 50%;
-
-    transform: translateX(-50%);
-
-    display: flex;
-
-    gap: 8px;
-
-    z-index: 3;
-
-    touch-action: none;
+    display: contents;
+    pointer-events: none;
 }
 
 
 .system-button {
+    position: fixed;
+
     min-width: clamp(50px, 10vw, 60px);
 
     height: 24px;
@@ -302,6 +304,8 @@ body[data-connection-state="session expired"] .connection-status {
     letter-spacing: 0.5px;
 
     touch-action: none;
+    pointer-events: auto;
+    z-index: 12;
 }
 
 .customize-toggle {
@@ -327,7 +331,18 @@ body[data-connection-state="session expired"] .connection-status {
     color: rgba(220, 235, 245, 0.82);
     font-size: 9px;
     letter-spacing: 1px;
-    z-index: 10;
+    z-index: 90;
+    touch-action: none;
+    pointer-events: auto;
+}
+
+.customize-toggle.edit-pressed {
+    border-color: rgba(120, 255, 235, 0.92);
+    background: rgba(20, 110, 120, 0.62);
+    color: #ffffff;
+    box-shadow:
+        0 0 14px rgba(120, 255, 235, 0.58),
+        inset 0 0 10px rgba(255, 255, 255, 0.14);
 }
 
 .customize-panel {
@@ -339,7 +354,7 @@ body[data-connection-state="session expired"] .connection-status {
         );
     right:
         max(
-            70px,
+            74px,
             env(safe-area-inset-right)
         );
     bottom:
@@ -348,21 +363,32 @@ body[data-connection-state="session expired"] .connection-status {
             env(safe-area-inset-bottom)
         );
 
-    display: flex;
-    gap: 6px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) minmax(110px, 18vw);
+    gap: 8px;
     align-items: center;
 
-    min-height: 30px;
-    padding: 4px;
+    min-height: 40px;
+    max-height: 42dvh;
+    padding: 7px;
 
     border: 1px solid rgba(140, 210, 255, 0.2);
     border-radius: 6px;
     background: rgba(1, 6, 12, 0.78);
     backdrop-filter: blur(10px);
-    z-index: 9;
+    z-index: 35;
     overflow-x: auto;
     overscroll-behavior: contain;
-    touch-action: pan-x;
+    touch-action: pan-x pan-y;
+}
+
+body[data-controller-ui-mode="CUSTOMIZE_MENU"] .customize-panel,
+body[data-controller-ui-mode="EDIT_LAYOUT"] .customize-panel,
+body[data-controller-ui-mode="COLORS"] .customize-panel,
+body[data-controller-ui-mode="PRESETS"] .customize-panel {
+    box-shadow:
+        0 0 0 1px rgba(120, 230, 255, 0.26),
+        0 12px 36px rgba(0, 0, 0, 0.52);
 }
 
 .customize-panel[hidden] {
@@ -370,14 +396,50 @@ body[data-connection-state="session expired"] .connection-status {
 }
 
 .customize-panel button {
-    min-width: 44px;
-    height: 22px;
+    min-width: 54px;
+    height: 26px;
     border: 1px solid rgba(180, 220, 245, 0.2);
     border-radius: 4px;
     background: rgba(80, 110, 140, 0.24);
     color: rgba(230, 245, 255, 0.86);
     font-size: 8px;
     letter-spacing: 0.6px;
+    white-space: nowrap;
+    touch-action: none;
+}
+
+.customize-panel-header {
+    display: grid;
+    gap: 2px;
+    min-width: 116px;
+    color: rgba(230, 245, 255, 0.9);
+    font-size: 8px;
+    letter-spacing: 0.8px;
+}
+
+.customize-panel-header strong {
+    font-size: 9px;
+    font-weight: 700;
+}
+
+#selected-control-label,
+#selected-control-size {
+    color: rgba(120, 230, 255, 0.86);
+}
+
+.customize-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    overflow-x: auto;
+    min-width: 0;
+}
+
+.control-size-slider {
+    width: 100%;
+    min-width: 100px;
+    accent-color: hsl(var(--ona-accent-hue, 185) 95% 62%);
+    touch-action: pan-x;
 }
 
 body.controller-customizing .customize-toggle {
@@ -385,12 +447,49 @@ body.controller-customizing .customize-toggle {
     color: #eaf6ff;
 }
 
+.controller-diagnostics {
+    position: fixed;
+    left:
+        max(
+            8px,
+            env(safe-area-inset-left)
+        );
+    top:
+        max(
+            8px,
+            env(safe-area-inset-top)
+        );
+
+    z-index: 79;
+
+    max-width: min(78vw, 420px);
+    padding: 6px 8px;
+    border: 1px solid rgba(120, 230, 255, 0.24);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.54);
+    color: rgba(226, 246, 255, 0.82);
+    font-size: 8px;
+    line-height: 1.45;
+    letter-spacing: 0.3px;
+    pointer-events: none;
+    white-space: pre-line;
+}
+
+body:not(.controller-diagnostics-enabled) .controller-diagnostics {
+    display: none;
+}
+
 .ona-customizable {
-    translate:
-        var(--ona-control-x, 0px)
-        var(--ona-control-y, 0px);
-    scale:
-        var(--ona-control-scale, 1);
+    --ona-base-transform: translate(-50%, -50%);
+    position: fixed !important;
+    left: var(--ona-control-left, 50vw) !important;
+    top: var(--ona-control-top, 50vh) !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform:
+        var(--ona-base-transform)
+        scale(var(--ona-control-scale, 1)) !important;
+    transform-origin: center;
 }
 
 body.controller-customizing .ona-customizable {
@@ -398,6 +497,8 @@ body.controller-customizing .ona-customizable {
         1px solid
         rgba(120, 230, 255, 0.42);
     outline-offset: 3px;
+    z-index: 30;
+    cursor: grab;
 }
 
 body.controller-customizing .ona-customizable.customization-selected {
@@ -405,14 +506,25 @@ body.controller-customizing .ona-customizable.customization-selected {
         2px solid
         rgba(255, 255, 255, 0.8);
     outline-offset: 5px;
+    box-shadow:
+        0 0 18px hsla(var(--ona-accent-hue, 185), 95%, 62%, 0.8),
+        0 0 36px hsla(var(--ona-accent-hue, 185), 95%, 62%, 0.28);
 }
 
-body[data-controller-palette="red"] .action-button,
-body[data-controller-palette="red"] #joystick {
-    border-color: rgba(255, 160, 160, 0.68);
+.action-button,
+#joystick {
+    border-color:
+        hsla(
+            var(--ona-accent-hue, 185),
+            95%,
+            72%,
+            0.65
+        );
     box-shadow:
-        0 0 12px rgba(255, 80, 90, 0.55),
-        0 0 30px rgba(255, 70, 70, 0.2),
+        0 0 calc(12px * var(--ona-glow-intensity, 1))
+            hsla(var(--ona-accent-hue, 185), 95%, 58%, 0.55),
+        0 0 calc(30px * var(--ona-glow-intensity, 1))
+            hsla(var(--ona-accent-hue, 185), 95%, 48%, 0.2),
         inset 0 0 18px rgba(255, 255, 255, 0.14);
 }
 
@@ -438,8 +550,8 @@ body[data-controller-palette="red"] #joystick {
 #joystick-zone {
     position: absolute;
 
-    left: 50%;
-    top: 50%;
+    left: 24%;
+    top: 60%;
 
     transform: translate(-50%, -50%);
 
@@ -556,6 +668,7 @@ body[data-controller-palette="red"] #joystick {
     z-index: 2;
 
     touch-action: none;
+    pointer-events: none;
 }
 
 
@@ -600,6 +713,7 @@ body[data-controller-palette="red"] #joystick {
         box-shadow 0.08s;
 
     touch-action: none;
+    pointer-events: auto;
 
     z-index: 3;
 }
@@ -610,34 +724,26 @@ body[data-controller-palette="red"] #joystick {
    ========================= */
 
 .button-y {
-    top: 2%;
-
-    left: 50%;
-
-    transform: translateX(-50%);
+    top: 35%;
+    left: 78%;
 }
 
 
 .button-x {
-    top: 34%;
-
-    left: 6%;
+    top: 55%;
+    left: 68%;
 }
 
 
 .button-b {
-    top: 34%;
-
-    right: 6%;
+    top: 55%;
+    left: 88%;
 }
 
 
 .button-a {
-    top: 66%;
-
-    left: 50%;
-
-    transform: translateX(-50%);
+    top: 75%;
+    left: 78%;
 }
 
 
@@ -651,7 +757,9 @@ body[data-controller-palette="red"] #joystick {
 .shoulder.virtual-pressed,
 .system-button:active,
 .system-button.virtual-pressed {
-    transform: scale(0.92);
+    transform:
+        var(--ona-base-transform, translate(-50%, -50%))
+        scale(calc(var(--ona-control-scale, 1) * 0.92)) !important;
 
     filter: brightness(1.35);
 }
@@ -662,8 +770,8 @@ body[data-controller-palette="red"] #joystick {
 .button-a:active,
 .button-a.virtual-pressed {
     transform:
-        translateX(-50%)
-        scale(0.92);
+        var(--ona-base-transform, translate(-50%, -50%))
+        scale(calc(var(--ona-control-scale, 1) * 0.92)) !important;
 }
 
 
@@ -686,10 +794,6 @@ body[data-controller-palette="red"] #joystick {
    ========================= */
 
 @media (max-height: 400px) {
-
-    .system-buttons {
-        top: clamp(28px, 8dvh, 38px);
-    }
 
     #joystick-zone {
         width:
